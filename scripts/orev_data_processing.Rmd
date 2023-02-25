@@ -1,0 +1,50 @@
+---
+title: "oREV data processing"
+output: html_document
+date: "2023-02-25"
+---
+
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+system("rsync -zaP ccp-odcJ:/srv/ccp-odc/orev-wonder/data/ ~/Work/Local/Quantex/wonder-analysis/data/orev_raw_data/")
+```
+
+```{r}
+files <- str_subset(dir("../data/orev_raw_data/", pattern = ".json"), pattern = "DELETE", negate = TRUE) 
+
+exlcude <- dir("../data/orev_raw_data/", pattern = "DELETE")%>%
+  as_tibble()%>%
+  separate(value, into = c("rest", "subjID"), sep = "-")%>%
+  mutate(subjID = str_replace(subjID, "DELETE",""))%>%
+  select(subjID)
+
+raw_data <- data_frame()
+for (f in files) {
+  jf <- paste("../data/orev_raw_data/",f,sep="")
+  jd <- jsonlite::fromJSON(paste(readLines(jf), collapse=""))
+  subjID <- jd$meta$subjID
+  touchscreen <- jd$meta$touchscreen
+  os <- jd$meta$os
+  order <- jd$meta$order
+  add <- as_data_frame(jd$data) %>% mutate(subjID = subjID,
+                                                 order = order, 
+                                           touchscreen = touchscreen, 
+                                           os = os)
+  raw_data <- bind_rows(raw_data, add)
+}
+
+# filter out DELETE subjID
+filtered_data <- raw_data%>%
+  filter(!subjID %in% exlcude$subjID)%>%
+  mutate(test_day = substr(timestamp, 0,10),
+         test_day = as.Date(test_day,"%Y-%m-%d"))%>%
+  mutate(correct = ifelse(targetWord == chosenWord, 1,0))
+
+
+write_csv(filtered_data, "../data/orev_data.csv")
+```

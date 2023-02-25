@@ -15,7 +15,167 @@ library(geomtextpath)
 
 
 ```{r}
-# MPI
-system("rsync -zaP ccp-odcJ:/srv/ccp-odc/orev-wonder/data/ ~/Work/Local/Quantex/wonder-analysis/data/orev_raw_data/")
+
+wonder_data <- read_csv("../data/wonder_data.csv")
+orev_data <- read_csv("../data/orev_data.csv")
+
+link_data <- wonder_data%>%
+  group_by(age, subjID)%>%
+  summarise(wonder = mean(score))%>%
+  left_join(orev_data%>%
+              group_by(subjID)%>%
+              summarise(orev = mean(correct)))%>%
+  mutate(age_group = substr(age, 1,1))
+
+link_data_select <- wonder_data%>%
+  filter(english %in% orev_data$targetWord)%>%
+  group_by(age, subjID)%>%
+  summarise(wonder = sum(score))%>%
+  left_join(orev_data%>%
+              group_by(subjID)%>%
+              summarise(orev = sum(correct)))%>%
+  mutate(age_group = substr(age, 1,1))
+
+```
+
+```{r}
+ggplot(link_data, aes(x = wonder, y = orev))+
+  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
+  geom_point(pch = 1, alpha = .5)+
+  stat_cor()+
+  #facet_grid(~age_group)+
+  lims(x = c(0,1), y = c(0,1))+
+  theme_bw()
+```
+
+
+```{r}
+ggplot(link_data_select, aes(x = wonder, y = orev))+
+  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
+  geom_point(pch = 1, alpha = .5)+
+  stat_cor()+
+  #facet_grid(~age_group)+
+  lims(x = c(0,22), y = c(0,22))+
+  theme_bw()
+```
+
+# new Data
+
+
+# old Data
+
+```{r}
+orev_d <- read_csv("../../vocab/data/clean_data.csv")%>%
+  filter(targetWord %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+  group_by(age,subjID)%>%
+  summarise(orev = mean(correct))
+
+wonder_d <- data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  #filter(english %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+  group_by(age, subjID)%>%
+  summarise(wonder = mean(score))
+
+wonder_d%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  ggplot(aes(x = wonder, y = orev))+
+  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
+  geom_point(pch = 1, alpha = .5)+
+  stat_cor()+
+  lims(x = c(0,1), y = c(0,1))+
+  theme_bw()
+
+library(ppcor)
+
+orev_wonder <- wonder_d%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  distinct(subjID, .keep_all = T)
+
+ppcor::pcor.test(orev_wonder$wonder, orev_wonder$orev, orev_wonder$age)
+
+
+library(brms)
+
+m_wonder <- data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  #filter(english %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+  group_by(age, subjID)%>%
+  summarise(sum  = sum(score),
+            n = n())%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  ungroup()%>%
+  mutate(age = scale(age),
+         orev = scale(orev))
+  
+
+m1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = m_wonder, chains = 4, cores = 4)
+```
+
+```{r}
+
+cor_sim <- tibble()
+
+for (i in 1:10000) {
+  
+  sub_words <- sample(data$word, 200)
+
+wd <- data%>%
+  filter(subjID %in% orev_d$subjID)%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  filter(word %in% sub_words)%>%
+  group_by(subjID)%>%
+  summarise(wonder = mean(score))%>%
+  arrange(subjID)
+  
+od <- orev_d%>%
+  filter(subjID %in% wd$subjID)%>%
+  arrange(subjID)%>%pull(orev)
+  
+cor <-  cor(wd%>%pull(wonder), od)
+
+word_list = list(sub_words)
+
+row <- tibble(words = word_list, iter = i, cor = cor)
+
+cor_sim <- bind_rows(cor_sim, row)
+  
+}
+
+cor_sim%>%
+  ggplot(aes(x = cor))+
+  geom_histogram(fill = "white", col= "black")+
+  theme_bw()
+
+hcw <- cor_sim%>%
+  unnest(cols = words)%>%
+  group_by(words)%>%
+  summarise(mean_cor = cor)%>%
+  arrange(-mean_cor)%>%
+  head(200)%>%
+  pull(words)
+
+data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  filter(word %in% hcw)%>%
+  group_by(subjID)%>%
+  summarise(wonder = mean(score))%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  summarise(cor = cor(wonder, orev))
 
 ```
