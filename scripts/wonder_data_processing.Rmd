@@ -1,0 +1,468 @@
+---
+title: "Wonder Data Processing"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(jsonlite)
+library(stringr)
+library(ggpubr)
+library(tidyboot)
+library(readxl)
+library(brms)
+library(ggthemes)
+library(writexl)
+library(ggdist)
+library(sf)
+library(geomtextpath)
+```
+
+```{r}
+# MPI
+system("rsync -zaP ccp-odcJ:/srv/ccp-odc/wonder/data/ ~/Work/Local/Quantex/wonder-analysis/data/wonder_raw_data/")
+
+```
+
+# Data 
+
+```{r, warning=F}
+files <- str_subset(dir("../data/wonder_raw_data/", pattern = ".json"), pattern = "wonder-", negate = F)
+
+files <- files[ !files == "wonder-.json"]
+
+files <- files[ !grepl("DELETE", files)]
+
+exlcude <- dir("../data/wonder_raw_data/", pattern = "DELETE")%>%
+  as_tibble()%>%
+  mutate(subjID = str_remove(value, "wonder-DELETE"),
+         subjID = str_remove(subjID, ".json"))%>%
+  dplyr::select(subjID)
+
+raw_data <- data_frame()
+jf <- c()
+jd <- c()
+add <- c()
+
+for (f in files) {
+  jf <- paste("../data/wonder_raw_data/",f,sep="")
+  jd <- jsonlite::fromJSON(paste(readLines(jf), collapse=""))
+  subjID <- jd$meta$subjID
+  add <- as_data_frame(jd$data) %>% mutate(subjID = subjID)
+  raw_data <- bind_rows(raw_data, add)
+}
+
+# filter out DELETE subjID
+filtered_data <- raw_data%>%
+  filter(!subjID %in% exlcude$subjID)%>%
+  mutate(test_day = substr(timestamp, 0,10),
+         test_day = as.Date(test_day,"%Y-%m-%d"))%>%
+  dplyr::select(-timestamp)%>%
+  rename(word_type = pos)%>%
+  right_join(read_xlsx("../data/wonder_full_list.xlsx")%>%rename(word = german))
+
+```
+
+```{r}
+dem <- bind_rows(
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet = 1),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =2),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =3),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =4),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =5)
+)%>%
+  dplyr::select(Code, Geburtsdatum, Geschlecht)%>%
+  distinct(Code, Geburtsdatum, Geschlecht, .keep_all = T)%>%
+  rename(subjID = Code, 
+         birth_day = Geburtsdatum)%>%
+  mutate(birth_day = as.Date(birth_day,"%d.%m.%Y"), 
+         sex = ifelse(Geschlecht == "Männlich", "m", "f"))
+```
+
+```{r}
+data <- filtered_data%>%
+  left_join(dem)%>%
+  mutate(age = as.numeric(difftime(test_day, birth_day, "days")/365.25))%>%
+  dplyr::select(-test_day, -birth_day, -Geschlecht)
+  
+```
+
+```{r}
+write_csv(data, "../data/wonder_tidy_data.csv")
+```
+
+
+```{r}
+# reminder
+complete <- data%>%
+  group_by(subjID, age)%>%
+  summarise(n = n())%>%
+  mutate(complete = ifelse(n == 379, "yes", "no"), 
+         age_group = substr(age, 1, 1))%>%
+  filter(complete == "yes")%>%
+  pull(subjID)
+
+
+bind_rows(
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet = 1),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =2),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =3),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =4),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =5)
+) %>%
+  filter(!Code %in% complete)%>%
+  write_xlsx(., "../data/wonder_raw_data/wonder_reminder_2.xlsx")
+```
+
+
+
+```{r}
+# data%>%
+#   group_by(subjID)%>%
+#   summarise(n = n())
+
+data%>%
+  group_by(subjID)%>%
+  summarise(n = n())%>%
+  mutate(complete = ifelse(n == 379, "yes", "no"))%>%
+  group_by(complete)%>%
+  summarise(count = n_distinct(subjID))
+
+data%>%
+  mutate(age_group = substr(age, 1, 1))%>%
+  group_by(subjID)%>%
+  summarise(n = n())%>%
+  mutate(complete = ifelse(n == 379, "yes", "no"))%>%
+  filter(complete == "yes")%>%
+  ungroup()%>%
+  summarise(n = n_distinct(subjID))
+
+data%>%
+  mutate(age_group = substr(age, 1, 1))%>%
+  group_by(subjID, age_group)%>%
+  summarise(n = n())%>%
+  mutate(complete = ifelse(n == 379, "yes", "no"), 
+         age_group = substr(age_group, 1, 1))%>%
+  filter(complete == "yes")%>%
+  group_by(age_group)%>%
+  summarise(n())
+
+
+data%>%
+  mutate(age_group = substr(age, 1, 1))%>%
+  group_by(subjID, age_group, sex)%>%
+  summarise(n = n())%>%
+  mutate(complete = ifelse(n == 379, "yes", "no"))%>%
+  filter(complete == "yes")%>%
+  group_by(sex)%>%
+  summarise(n())
+
+```
+
+
+
+```{r}
+data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  select(-n)%>%
+  group_by(word, aoa_rating_german)%>%
+  summarise(mean = mean(score))%>%
+  ggplot(aes(x = aoa_rating_german, y = mean))+
+  geom_smooth()+
+  geom_point(pch = 1, alpha = 0.5)+
+  stat_cor()+
+  theme_bw()
+
+```
+
+```{r}
+data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  select(-n)%>%
+  group_by(word, aoa_rating_german, word_type)%>%
+  summarise(mean = mean(score))%>%
+  ggplot(aes(x = aoa_rating_german, y = mean))+
+  geom_smooth()+
+  geom_point(pch = 1, alpha = 0.5)+
+  stat_cor()+
+  facet_grid(~word_type)+
+  theme_bw()
+```
+
+
+```{r}
+data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  select(-n)%>%
+  #group_by(subjID, age, word_type)%>%
+  group_by(subjID, age)%>%
+  summarise(mean = mean(score))%>%
+  ggplot(aes(x = age, y = mean))+
+  geom_point(pch = 1, alpha = 0.5)+
+  geom_smooth()+
+  stat_cor()+
+  #facet_grid(~word_type)+
+  theme_bw()
+```
+
+```{r}
+data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  select(-n)%>%
+  group_by(subjID, age, word_type)%>%
+  #group_by(subjID, age)%>%
+  summarise(mean = mean(score))%>%
+  ggplot(aes(x = age, y = mean))+
+  geom_point(pch = 1, alpha = 0.5)+
+  geom_smooth()+
+  stat_cor()+
+  facet_grid(~word_type)+
+  theme_bw()
+```
+
+```{r}
+p1 <- data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  select(-n)%>%
+  filter(!is.na(sex))%>%
+  group_by(subjID, sex)%>%
+  summarise(mean = mean(score))
+
+p2 <- p1%>%
+  filter(!is.na(sex))%>%
+  group_by(sex)%>%
+  tidyboot_mean(column = mean)
+
+ggplot(p2, aes(x = sex, y = mean))+
+  geom_jitter(data = p1, pch = 1, alpha = .15, height = 0)+
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper), col = "firebrick")+
+  theme_bw()
+```
+
+
+```{r}
+library(mirt)
+
+remove <- c("essen")
+
+firt_dat <- data%>%
+  group_by(subjID)%>%
+  distinct(word, .keep_all = T)%>%
+  mutate(n = n(),
+         complete = ifelse(n == 379, "yes", "no"))%>%
+  filter(complete == "yes")%>%
+  ungroup()%>%
+  select(subjID,word, score)%>%
+  filter(!word %in% remove)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  ungroup()%>%
+  select(-subjID)
+
+firt1 <- mirt(firt_dat, 1, itemtype = "Rasch")
+firt2 <- mirt(firt_dat, 1, itemtype = "2PL",technical = list(NCYCLES = 1000), SE = T)
+
+anova(firt1, firt2)
+```
+
+```{r}
+coefs2PL <- coef(firt2,
+     as.data.frame = TRUE,
+     IRTpars = T)%>%
+  as_tibble(rownames = "x")%>%
+  separate(x, into = c("item", "nlpar"), sep = "\\.", remove = T)%>%
+  mutate(nlpar = recode(nlpar,
+                       b = "Easiness",
+                       a = "Discrimination"
+                      ))%>%
+  filter(nlpar != "g", nlpar != "u", item != "GroupPars")
+
+coefs2PL%>%
+  ggplot(aes(x = par))+
+  geom_vline(xintercept = 1, lty = 3)+
+  geom_density()+
+  facet_grid(~nlpar)
+
+```
+
+```{r}
+traceline <- NULL
+for(i in 1:378){
+extr.2 <- extract.item(firt2, i)
+Theta <- matrix(seq(-6,6, by = .1))
+traceline[[i]] <- probtrace(extr.2, Theta)
+}
+
+# rename list
+names(traceline) <- paste0('item',1:length(traceline))
+
+# rbind traceline
+traceline.df <- do.call(rbind, traceline)
+
+# create item names length based on length of theta provided
+item <- rep(names(traceline),each=length(Theta))
+
+# put them all together into a dataframe
+l.format <- cbind.data.frame(Theta, item, traceline.df)
+
+
+l.format$item<-as.factor(l.format$item)
+aux<-l.format %>%
+  group_by(item) %>%
+  slice(which.min(abs(P.1-0.5))) # We are only using the P.1 column (dichotomous)
+
+aux<-aux[order(aux$Theta),]
+ord<-as.integer(aux$item)
+l.format$item = factor(l.format$item,levels(l.format$item)[ord])
+
+names <- data%>%
+  filter(!word %in% remove)%>%
+  distinct(word, .keep_all = T)%>%
+  select(word)%>%
+  mutate(item = paste0("item",row_number()))
+
+format <- l.format%>%left_join(names)%>%left_join(data%>% distinct(word, .keep_all = T)%>%select(word, aoa_rating_german))
+
+# plot chart
+ggplot(format, aes(Theta, P.1, col = aoa_rating_german, group = item)) + 
+  geom_line() + 
+  #ggtitle('Probability Tracelines') + 
+  xlab(expression(theta)) + 
+  ylab(expression(P(theta))) + 
+  #facet_wrap(~targetWord)+
+  ylim(0,1)+
+  scale_color_viridis_c(name = "AoA") +
+  #geom_hline(yintercept = 0.25, lty = 3, alpha = .75) +
+  theme_bw() + 
+  theme(
+        axis.text.x=element_text(colour="black"),
+        axis.text.y=element_text(colour="black"),
+        legend.title=element_blank())
+```
+
+
+```{r}
+orev_d <- read_csv("../../vocab/data/clean_data.csv")%>%
+  filter(targetWord %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+  group_by(age,subjID)%>%
+  summarise(orev = mean(correct))
+
+wonder_d <- data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  #filter(english %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+  group_by(age, subjID)%>%
+  summarise(wonder = mean(score))
+
+wonder_d%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  ggplot(aes(x = wonder, y = orev))+
+  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
+  geom_point(pch = 1, alpha = .5)+
+  stat_cor()+
+  lims(x = c(0,1), y = c(0,1))+
+  theme_bw()
+
+library(ppcor)
+
+orev_wonder <- wonder_d%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  distinct(subjID, .keep_all = T)
+
+ppcor::pcor.test(orev_wonder$wonder, orev_wonder$orev, orev_wonder$age)
+
+
+library(brms)
+
+m_wonder <- data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  #filter(english %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+  group_by(age, subjID)%>%
+  summarise(sum  = sum(score),
+            n = n())%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  ungroup()%>%
+  mutate(age = scale(age),
+         orev = scale(orev))
+  
+
+m1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = m_wonder, chains = 4, cores = 4)
+```
+
+```{r}
+
+cor_sim <- tibble()
+
+for (i in 1:10000) {
+  
+  sub_words <- sample(data$word, 200)
+
+wd <- data%>%
+  filter(subjID %in% orev_d$subjID)%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  filter(word %in% sub_words)%>%
+  group_by(subjID)%>%
+  summarise(wonder = mean(score))%>%
+  arrange(subjID)
+  
+od <- orev_d%>%
+  filter(subjID %in% wd$subjID)%>%
+  arrange(subjID)%>%pull(orev)
+  
+cor <-  cor(wd%>%pull(wonder), od)
+
+word_list = list(sub_words)
+
+row <- tibble(words = word_list, iter = i, cor = cor)
+
+cor_sim <- bind_rows(cor_sim, row)
+  
+}
+
+cor_sim%>%
+  ggplot(aes(x = cor))+
+  geom_histogram(fill = "white", col= "black")+
+  theme_bw()
+
+hcw <- cor_sim%>%
+  unnest(cols = words)%>%
+  group_by(words)%>%
+  summarise(mean_cor = cor)%>%
+  arrange(-mean_cor)%>%
+  head(200)%>%
+  pull(words)
+
+data%>%
+  group_by(subjID)%>%
+  mutate(n = n())%>%
+  filter(n == 379)%>%
+  dplyr::select(-n)%>%
+  filter(word %in% hcw)%>%
+  group_by(subjID)%>%
+  summarise(wonder = mean(score))%>%
+  left_join(orev_d)%>%
+  filter(!is.na(orev))%>%
+  summarise(cor = cor(wonder, orev))
+
+```
+

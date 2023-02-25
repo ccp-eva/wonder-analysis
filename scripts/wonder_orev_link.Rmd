@@ -1,0 +1,21 @@
+---
+title: "Wonder oREV link"
+output: html_document
+date: "2023-02-25"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggpubr)
+library(tidyboot)
+library(brms)
+library(ggthemes)
+library(geomtextpath)
+```
+
+
+```{r}
+# MPI
+system("rsync -zaP ccp-odcJ:/srv/ccp-odc/orev-wonder/data/ ~/Work/Local/Quantex/wonder-analysis/data/orev_raw_data/")
+
+```

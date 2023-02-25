@@ -1,0 +1,91 @@
+---
+title: "word lists"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(jsonlite)
+```
+
+
+# Annotated wonder word list from Natalia
+
+```{r}
+
+nat_an <- read_xlsx("../data/wonder_word_list_natalia.xlsx")%>%
+  select(-c(`geschätzter Erwerbsalter in Monaten`, `Onsetfrequenzen Rang 1-60`, Anzahl, Häufigkeitsklasse, `Silbenfrequenz?`))%>%
+  rename(freq_celex = `Freq Mündlich (0-485 pro Million).`, 
+         concreteness = Konkretheit)%>%
+  pivot_longer(cols = c(10:24), names_to = "sem_cat", values_to = "x")%>%
+  group_by(german, english, aoa_rating_german, aoa_rating_english, word_type)%>%
+  arrange(x, .group_by = T)%>%
+  distinct(german, english, aoa_rating_german, aoa_rating_english, word_type, .keep_all = T)%>%
+  mutate(sem_cat = ifelse(is.na(x), NA, sem_cat))%>%
+  select(-x)%>%
+  mutate(sem_cat = recode(sem_cat, 
+                          `semantische kategorie Tiere` = "animals",
+                          `semantische kategorie Insekten` = "insects",
+                          `semantische kategorie Essen` = "food",
+                          `semantische kategorie Möbel` = "furniture",
+                          `semantische kategorie Kleidung` = "cloths",
+                          `semantische kategorie Bewegungsmittel` = "transport",
+                          `semantische kategorie Körper` = "body",
+                          `semantische kategorie Vögel` = "birds",
+                          `semantische kategorie Spielzeug` = "toys",
+                          `semantische kategorie Berufe` = "jobs",
+                          `semantische kategorie Natur` = "nature",
+                          `semantische kategorie Werkzeug` = "tools",
+                          `semantische kategorie Geschirr/Küche` = "kitchen",
+                          `semantische kategorie Wohnung` = "housing",
+                          `semantische kategorie Menschen` = "humans"))
+
+
+
+sel_nat <- nat_an%>%
+  filter(select == "x")
+
+
+ggplot(sel_nat, aes(x = sem_cat))+
+  geom_bar(stat = "count")+
+  facet_grid(~word_type)
+
+
+ggplot(sel_nat, aes(x = sem_cat))+
+  geom_bar(stat = "count")+
+  facet_grid(~word_type)
+
+sel_nat%>%
+  filter(orev == "x")
+
+```
+
+
+```{r}
+
+export_sel_nat <- sel_nat%>%
+  ungroup()%>%
+  select(german, word_type)%>%
+  rename(word = german,
+         pos = word_type)%>%
+  mutate(word = ifelse(pos == "noun", str_to_title(word),word),
+         rand = rnorm(length(word),0,1))%>%
+  arrange(rand)%>%
+  select(-rand)
+
+export_sel_nat%>%
+  group_by(word)%>%
+  summarise(n = n())%>%
+  arrange(-n)
+
+
+sel_nat%>%
+  ungroup()%>%
+  select(german, english, word_type, aoa_rating_german)%>%
+  mutate(german = ifelse(word_type == "noun", str_to_title(german),german))%>%
+  writexl::write_xlsx("../data/wonder_full_list.xlsx")
+
+ write_json(export_sel_nat, "../data/wonder_data.json")
+```
+
