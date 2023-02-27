@@ -7,4 +7,6 @@ data/*_raw_data/*
 
 wonder_word_list_natalia.xlsx
 
- data/.DS_Store
+data/.DS_Store
+
+.DS_Store

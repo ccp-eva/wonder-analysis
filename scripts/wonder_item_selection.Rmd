@@ -1,0 +1,879 @@
+---
+title: "oREV item selection and analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggpubr)
+library(ggthemes)
+library(tidybayes)
+library(brms)
+library(rstan)
+library(loo)
+library(coda)
+library(testing)
+library(geomtextpath)
+library(ggridges)
+
+estimate_mode <- function(s) {
+  d <- density(s)
+  return(d$x[which.max(d$y)])
+}
+
+hdi_upper<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","upper"])
+}
+
+hdi_lower<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","lower"])
+}
+
+func <- function(x){
+  abs(1-x)
+}
+```
+
+```{r}
+data <- read_csv("../data/clean_data.csv")
+
+irt_dat <- data%>%
+  select(subjID, targetWord, correct, order, sex, aoa_german_comb)
+
+aoa <- data%>%distinct(targetWord, .keep_all = T)%>%select(targetWord, aoa_german_comb)
+
+full <- data%>%
+  group_by(subjID)%>%
+  summarise(mean_full = mean(correct))
+```
+
+# Models
+
+## Rasch Model
+
+```{r}
+prior_1pl_guess <- 
+  prior("normal(0, 2)", class = "b", nlpar = "eta") +
+  prior("normal(0, 1)", class = "sd", group = "subjID", nlpar = "eta") + 
+  prior("normal(0, 3)", class = "sd", group = "targetWord", nlpar = "eta")
+```
+
+
+### Model
+
+```{r}
+irt1_guess <- brm(
+  data = irt_dat,
+  family = brmsfamily("bernoulli", "identity"),
+  bf(
+    correct ~ 0.25 + 0.75 * inv_logit(eta),
+    eta ~ 1 + (1 | targetWord) + (1 | subjID),
+    nl = TRUE
+  ),
+  prior = prior_1pl_guess,
+  control = list(adapt_delta = 0.95, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)%>%add_criterion(c("loo","waic")) 
+
+
+saveRDS(irt1_guess, "../saves/irt1_guess.rds")
+
+irt1_guess <- readRDS("../saves/irt1_guess.rds")
+```
+
+### Model to extract fit indices
+
+```{r}
+prior_1pl_guess <- prior("normal(0, 2)", class = "b", nlpar = "eta") +
+  prior("normal(0, 1)", class = "sd", group = "subjID", nlpar = "eta") +
+  prior("normal(0, 3)", class = "sd", group = "targetWord", nlpar = "eta")
+
+irt1_guess_standata <- brms:::make_standata(
+  formula = bf(
+    correct ~ 0.25 + 0.75 * inv_logit(eta),
+    eta ~ 1 + (1 | targetWord) + (1 | subjID),
+    nl = TRUE
+  ),
+  data = irt_dat,
+  family = brmsfamily("bernoulli", "identity"),
+  prior = prior_1pl_guess
+)
+
+irt1_guess_itemloo <- stan(
+  file = "../analysis/irt1_guess_itemloo.stan",
+  data = irt1_guess_standata[c("N", "Y", "N_1", "J_1", "N_2", "J_2")],
+  control = list(adapt_delta = 0.95, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000
+)
+
+saveRDS(irt1_guess_itemloo, "../saves/irt1_guess_itemloo.rds")
+
+irt1_guess_itemloo <- readRDS("../saves/irt1_guess_itemloo.rds")
+
+irt1_guess_itemloo_loom <- loo(irt1_guess_itemloo, pars = "loglik_m")
+
+saveRDS(irt1_guess_itemloo_loom, file = "../saves/irt1_guess_looitems_loom.rds")
+
+irt1_guess_itemloo_idxs <- irt_dat %>%
+  mutate(item_id = as.integer(factor(targetWord))) %>%
+  group_by(targetWord) %>%
+  summarize(
+    mean_correct = mean(correct),
+    item_id = unique(item_id),
+    targetWord = unique(targetWord)
+  ) %>%
+  full_join(mutate(as_tibble(irt1_guess_itemloo_loom$pointwise[, "influence_pareto_k", drop = FALSE]), item_id = row_number())) %>%
+  rename(pareto_k = influence_pareto_k) %>%
+  full_join(
+    as_draws_df(irt1_guess_itemloo) %>% 
+      select(.chain, .iteration, starts_with("infit"), starts_with("outfit"), starts_with("r_2")) %>% 
+      pivot_longer(-c(.chain, .iteration), names_pattern = "(.+)\\[([0-9]+)\\]", names_to = c(".value", "item_id")) %>% 
+      rename(threshold = r_2_eta_1) %>% 
+      mutate(item_id = as.integer(item_id)) %>% 
+      group_by(item_id) %>% 
+      summarize(across(c(infit, outfit, threshold), list(mean = mean, mode = estimate_mode, hdi_lower = hdi_lower, hdi_upper = hdi_upper)))
+  ) %>%
+  arrange(pareto_k) %>%
+  print(n = nrow(.))
+
+saveRDS(irt1_guess_itemloo_idxs, file = "../saves/irt1_guess_itemloo_idxs.rds")
+
+irt1_guess_itemloo_idxs <- readRDS(file = "../saves/irt1_guess_itemloo_idxs.rds")
+```
+
+## 2PL Model
+
+```{r}
+prior_va_2pl <- 
+  prior("normal(0, 2)", class = "b", nlpar = "eta") +
+  prior("normal(0, 1)", class = "b", nlpar = "logalpha") +
+  prior("normal(0, 1)", class = "sd", group = "subjID", nlpar = "eta") + 
+  prior("normal(0, 3)", class = "sd", group = "targetWord", nlpar = "eta") +
+  prior("normal(0, 1)", class = "sd", group = "targetWord", nlpar = "logalpha")
+```
+
+```{r}
+irt2PL <- brm(
+  data = irt_dat,
+  family = brmsfamily("bernoulli", "identity"),
+  bf(
+    correct ~ 0.25 + 0.75 * inv_logit(exp(logalpha) * eta),
+    eta ~ 1 + (1 |i| targetWord) + (1 | subjID),
+    logalpha ~ 1 + (1 |i| targetWord),
+    nl = TRUE
+  ),
+  prior = prior_va_2pl,
+  control = list(adapt_delta = 0.95, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)%>%add_criterion(c("loo","waic")) 
+
+saveRDS(irt2PL, "../saves/irt2PL.rds")
+
+irt2PL <- readRDS("../saves/irt2PL.rds")
+
+coef2PL <- coef(irt2PL)
+```
+
+# Indices
+
+```{r}
+items <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(targetWord)
+easiness_rasch <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(threshold_mode)
+infit <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>% pull(infit_mode)
+outfit <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(outfit_mode)
+disc_2PL <- coef2PL$targetWord[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
+pkd <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(pareto_k)
+
+```
+
+# Item selection
+
+## Score
+
+```{r}
+score_dist <- tibble()
+
+for (j in 1:16) {
+  
+for (i in 10:35) {
+  
+  x <- sample(easiness_rasch, i)
+  
+	nn_dists <- rep(0, length(x)-1)
+	
+	for(k in 1:length(x)-1) {
+		nn_dists[k] <- x[k+1] - x[k]
+	}
+	
+	x2 <- sample(disc_2PL, i)
+  x_dist2 <- unlist(lapply(x2, func))
+  
+  x3 <- sample(infit, i)
+  x_dist3 <- unlist(lapply(x3, func))
+
+  x4 <- sample(outfit, i)
+  x_dist4 <- unlist(lapply(x4, func))
+  
+  x <- sample(pkd, i)
+
+
+  mean_spacing <- -1*sd(nn_dists)/3
+  var_2PL <- -1*var(x_dist2)*10
+  mean_infit <- -2*mean(x_dist3)
+  mean_outfit <- -4*mean(x_dist4)
+  mean_pkd <- mean(x)/5
+  
+  sum_score = mean_spacing + mean_infit + mean_outfit+ var_2PL +mean_pkd
+  
+	row <- tibble(iter = j,
+                size = i, 
+                spacing = mean_spacing,
+	              infit = mean_infit,
+	              outfit = mean_outfit,
+	              var_2PL_disc = var_2PL, 
+	              pkd = mean_pkd, 
+	              score = sum_score)
+	
+  score_dist <- bind_rows(score_dist,row)
+}
+}
+
+score_dist%>%
+  pivot_longer(cols = c(-size, -iter), names_to = "type", values_to = "value")%>%
+  ggplot(aes(x = factor(size), y = value, col = type))+
+  geom_point(pch = 1)+
+  facet_wrap(~iter)+
+  ggtitle("Score = spacing + infit + outfit+ var_2PL_disc + pkd")+
+  theme_bw()
+
+```
+
+```{r}
+ggsave("../graphs/score.png", height = 12, width = 16, scale = 1)
+```
+
+## Simulated annealing algorithm
+
+```{r}
+score_fn <- function(subset) {
+	easinesses <- sort(easiness_rasch[subset])
+	nn_dists <- rep(0, sum(subset)-1)
+	for(i in 1:sum(subset)-1) {
+		nn_dists[i] <- easinesses[i+1] - easinesses[i]
+	}
+	spacing <- -1*sd(nn_dists)/3
+	
+	var_disc_sample <- disc_2PL[subset]
+	var_disc_2PL <- -1*var(var_disc_sample)*10
+	
+	infit_sample <- infit[subset]
+	infit_dist <- unlist(lapply(infit_sample, func))
+  mean_infit <- -4*mean(infit_dist)
+  
+	outfit_sample <- outfit[subset]
+	outfit_dist <- unlist(lapply(outfit_sample, func))
+  mean_outfit <- -2*mean(outfit_dist)
+  
+  #mean_pkd <- mean(pkd[subset])/5
+
+
+	 
+	# sel <- items[subset == TRUE]
+	# 
+	# sub_dat <- data%>%
+	#   filter(targetWord %in% sel)%>%
+	#   group_by(subjID)%>%
+	#   summarise(mean_sub = mean(correct))
+	# 
+	# cor <- cor(sub_dat$mean_sub,full$mean_full)
+	# 
+	# return(spacing + mean_discrim/6 + cor/3)
+	return(spacing + mean_infit + mean_outfit+ var_disc_2PL)
+}
+
+
+proposal_fn <- function(subset) {
+	# Randomly sample a number of swaps.
+	# Prefer a small number of swaps for "fine tuning", but allow
+	# occasional large numbers of swaps, including a complete
+	# exchange of the subset
+	subset_size = sum(as.integer(subset))
+	max_swaps = min(subset_size, length(subset) - subset_size)
+	swaps <- rbinom(1, max_swaps-1, 1/(max_swaps-1)) + 1
+
+	# Choose the items to swap
+	active_items <- seq(1:length(subset))[subset == TRUE]
+	inactive_items <- seq(1:length(subset))[subset == FALSE]
+	actives_to_swap <- sample(active_items, swaps)
+	inactives_to_swap <- sample(inactive_items, swaps)
+
+	# Do the swapping
+	for(i in 1:swaps) {
+		subset[actives_to_swap[i]] <- FALSE
+		subset[inactives_to_swap[i]] <- TRUE
+	}
+	return(subset)
+}
+
+simulated_annealing_rasch <- function(k, cooling_ratio=0.999, reset_thresh=1000, break_thresh=10000) {
+  
+  items <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(targetWord)
+  easiness_rasch <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(threshold_mode)
+  infit <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>% pull(infit_mode)
+  outfit <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(outfit_mode)
+  disc_2PL <- coef2PL$targetWord[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
+  pkd <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(pareto_k)
+
+  N <- length(easiness_rasch)
+
+	current_subset <- sample(c(rep(TRUE, k), rep(FALSE, N-k)))
+	best_subset <- current_subset
+	best_score <- score_fn(best_subset)
+
+	temp <- 100
+	rejected <- 0
+	no_new_bests <- 0
+	for(i in 1:1e6) {
+		# Score new subset, and toss a coin
+		new_subset <- proposal_fn(current_subset)
+		new_score <- score_fn(new_subset)
+		accept_decrease <- rbernoulli(1, temp / 100)
+
+		# Accept the new subset if it's an improvement, or if our
+		# cooling coin came up heads.
+		if(new_score > best_score | accept_decrease) {
+			current_subset <- new_subset
+			rejected <- 0
+			if(new_score > best_score) {
+				best_subset <- new_subset
+				best_score <- new_score
+				no_new_bests <- 0
+			} else {
+				no_new_bests <- no_new_bests + 1
+			}
+		# Quit if we've had too many rejections in a row.
+		} else {
+			rejected <- rejected + 1
+			no_new_bests <- no_new_bests + 1
+			if(rejected == break_thresh) {
+				#print(best_score)
+			  ret <- tibble(best_subset = list(best_subset),
+	              best_score = best_score)
+			  
+				return(ret)
+			}
+		}
+		# Start random resets to the current best subset if we haven't
+		# found anything better in quite a while.
+		if(no_new_bests > reset_thresh & rbernoulli(1, 1/100)) {
+			current_subset <- best_subset
+		}
+
+		# Cool it!
+		temp <- temp*cooling_ratio
+	}
+	#print(best_score)
+	ret <- tibble(best_subset = list(best_subset),
+	              best_score = best_score)
+	
+	return(ret)
+}
+```
+
+### Test run
+
+```{r, message=F, warning=F, comment=F}
+sim_rasch_test <- simulated_annealing_rasch(22)
+
+sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
+
+sub_rasch_test <- data%>%
+  filter(targetWord %in% sel_items_rasch_test,
+         )%>%
+  group_by(age_group,subjID)%>%
+  summarise(mean_sub = mean(correct))
+
+comp_rasch_test<- full%>%left_join(sub_rasch_test)
+
+ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
+  geom_abline(intercept = 0, slope = 1, lty = 2, alpha = .75)+
+  geom_jitter(pch = 1, alpha = .75, height = 0.01, width = 0.01)+
+  stat_cor()+
+  facet_wrap(~age_group)+
+  ylim(0,1.02)+
+  xlim(0,1.02)+
+  theme_few()
+```
+
+## Check variation in score
+
+```{r, warning=FALSE}
+sim_score_rasch <- tibble()
+
+for (i in 5:40) {
+  
+  for (j in 1:5) {
+  
+   sim <- simulated_annealing_rasch(i)
+  
+   score <- tibble(score = sim$best_score, 
+                   size = i,
+                   iter = j)
+   
+   sim_score_rasch <- bind_rows(sim_score_rasch, score)
+  }
+  
+}
+
+saveRDS(sim_score_rasch, "../saves/variation_in_score.rds")
+
+sim_score_rasch%>%
+  ggplot(aes(x = size, y = score, group = iter))+
+  geom_point(pch = 1)+
+  theme_minimal()
+```
+
+## Determine size
+
+```{r}
+# #determine_size <- tibble()
+#   
+#   for(j in 5:5){
+#   
+#   for (i in c(36:40)) {
+#     
+#     sim <- simulated_annealing_rasch(i)
+#     
+#     sel <- items[unlist(sim$best_subset) == TRUE]
+#     
+#     sub_dat <- irt_dat%>%filter(targetWord %in% sel)
+#   
+#     m1PL <- update(irt1_guess, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo"))
+#   	m3PL <- update(irt2PL, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo")) 
+#   	
+#   	comp <- loo_compare(m1PL, m3PL)%>%as_tibble(rownames = "model")%>%filter(model == "m1PL")%>%mutate(ratio = abs(elpd_diff)/(2*se_diff))
+#   	
+#   	sub_dat_cor <- sub_dat%>%
+#   	  group_by(subjID)%>%
+#   	  summarise(mean_sub = mean(correct))
+#   
+#   	cor <- cor(sub_dat_cor$mean_sub,full$mean_full)
+#   	
+#   	row <- tibble(size = i, 
+#            iter = j,
+#            elpd_diff = as.numeric(comp%>%pull(elpd_diff)),
+#            se_diff = as.numeric(comp%>%pull(se_diff)),
+#            ratio = as.numeric(comp%>%pull(ratio)),
+#            correlation = cor)
+#     
+#     determine_size <- bind_rows(determine_size, row)
+#     
+#     saveRDS(determine_size, "../saves/determine_size.rds")
+#   }
+#   
+#   }
+#   
+# saveRDS(determine_size, "../saves/determine_size.rds")
+
+determine_size <- readRDS("../saves/determine_size.rds")
+
+determine_size%>%
+  mutate(ratio = ifelse(elpd_diff == 0,0,ratio))%>%
+  pivot_longer(cols = c(ratio, correlation), names_to = "type",values_to = "value")%>% 
+  ggplot(aes(x = factor(size), y = value))+
+  geom_point(pch = 1)+
+  #geom_line()+
+  facet_grid(type~. , scales = "free_y")+
+  theme_bw()+
+  labs(x = "No. of items", y = "Comparison value", title = "ratio = abs(elpd_diff)/(2*se_diff)")
+
+```
+
+```{r}
+ggsave("../graphs/item_sel.png", height = 6, width = 10, scale = 1)
+```
+
+## Correlation by age and size
+
+```{r}
+cor_age_sex <- tibble()
+
+for (j in 1:5) {
+  
+for (i in 10:40) {
+  
+   sim <- simulated_annealing_rasch(i)
+  
+    sel <- items[unlist(sim$best_subset) == TRUE]
+
+
+    cor <- data%>%
+      filter(targetWord %in% sel)%>%
+      group_by(age_group,sex,subjID)%>%
+  summarise(mean_sub = mean(correct))%>%
+  right_join(full)%>%
+  group_by(sex, age_group)%>%
+  summarise(cor = cor(mean_sub, mean_full))%>%
+  mutate(size = i, 
+         iter = j)
+  
+  cor_age_sex <- bind_rows(cor_age_sex, cor)
+}
+
+}
+  
+saveRDS(cor_age_sex, "../saves/cor_age_sex.rds")
+
+cor_age_sex <- readRDS("../saves/cor_age_sex.rds")
+```
+
+
+## Extract selected items
+
+```{r}
+item_sel_rasch <- tibble()
+
+for (i in 1:100) {
+  
+   sim <- simulated_annealing_rasch(22)
+  
+   sel <- items[unlist(sim$best_subset) == TRUE]
+  
+   it <- data%>%
+     distinct(targetWord)%>%
+     filter(targetWord %in% sel)%>%
+     select(targetWord)%>%
+     mutate(iter = i)
+   
+   item_sel_rasch <- bind_rows(item_sel_rasch, it)
+}
+
+item_sel_rasch%>%
+  group_by(targetWord)%>%
+  summarise(n = n()/max(iter))%>%
+  ggplot(aes(x = reorder(targetWord, -n), y = n))+
+  geom_bar(stat = "identity", col = "black", fill = "white")+
+  labs(x = "Item", y = "Proportion selected")+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+rasch_selected_items <- item_sel_rasch%>%
+  group_by(targetWord)%>%
+  summarise(n = n()/max(iter))%>%
+  arrange(-n)%>%
+  top_n(22)%>%
+  pull(targetWord)
+
+saveRDS(rasch_selected_items, "../saves/selected_items_rasch.rds")
+
+rasch_selected_items <- readRDS("../saves/selected_items_rasch.rds")
+```
+
+# Rasch model with selected items
+
+## Fit model 
+
+```{r}
+irt_dat_sel <- irt_dat%>%
+  filter(targetWord %in% rasch_selected_items)
+```
+
+
+```{r}
+irt1_guess_sel <- brm(
+  data = irt_dat_sel,
+  family = brmsfamily("bernoulli", "identity"),
+  bf(
+    correct ~ 0.25 + 0.75 * inv_logit(eta),
+    eta ~ 1 + (1 | targetWord) + (1 | subjID),
+    nl = TRUE
+  ),
+  prior = prior_1pl_guess,
+  control = list(adapt_delta = 0.95, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)%>%add_criterion(c("loo","waic")) 
+
+
+saveRDS(irt1_guess_sel, "../saves/irt1_guess_sel.rds")
+
+irt1_guess_sel <- readRDS("../saves/irt1_guess_sel.rds")
+```
+
+## ICC
+
+```{r}
+icc1_guess_sel <- posterior_samples(irt1_guess_sel)%>% 
+  select(b_eta_Intercept, starts_with("r_targetWord"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_targetWord"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
+  expand(nesting(iter, b_eta_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  mutate(p = 0.25 + 0.75*inv_logit_scaled((b_eta_Intercept + theta + xi))) %>%  
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(aoa%>%rename(item = targetWord))
+```
+
+```{r}
+icc1_guess_sel %>% 
+  ggplot(aes(x = theta, y = p,group = item, col = aoa_german_comb)) +
+  geom_line() +
+  #geom_textline(aes(label = item)) +
+  geom_hline(yintercept = 0.25, lty = 3, alpha = .75)+
+  scale_color_viridis_c(name = "AoA") +
+  labs(title = "ICCs for the 1PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  ylim(0,1)+
+  theme_minimal()
+```
+
+```{r}
+ggsave("../graphs/ICC_1PL_sel.png", height = 6, width = 10, scale = 1, bg = "white")
+```
+
+## Differential Item Functioning
+
+### Sex
+
+```{r}
+irt1_guess_dif_sex_sel <-  brm(
+  data = irt_dat_sel,
+  family = brmsfamily("bernoulli", "identity"),
+  bf(
+    correct ~ 0.25 + 0.75 * inv_logit(eta),
+    eta ~ 1 + (0+ sex | targetWord) + (1 | subjID),
+    nl = TRUE
+  ),
+  prior = prior_1pl_guess,
+  control = list(adapt_delta = 0.95, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)%>%add_criterion(c("loo","waic"))  
+
+
+saveRDS(irt1_guess_dif_sex_sel, "../saves/irt1_guess_dif_sex_sel.rds")
+
+irt1_guess_dif_sex_sel<- readRDS("../saves/irt1_guess_dif_sex_sel.rds")
+
+```
+
+### Order
+
+```{r}
+irt1_guess_dif_order_sel <- brm(
+  data = irt_dat_sel,
+  family = brmsfamily("bernoulli", "identity"),
+  bf(
+    correct ~ 0.25 + 0.75 * inv_logit(eta),
+    eta ~ 1 + (0+ order | targetWord) + (1 | subjID),
+    nl = TRUE
+  ),
+  prior = prior_1pl_guess,
+  control = list(adapt_delta = 0.95, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)%>%add_criterion(c("loo","waic")) 
+
+saveRDS(irt1_guess_dif_order_sel, "../saves/irt1_guess_dif_order_sel.rds")
+
+irt1_guess_dif_order_sel<- readRDS("../saves/irt1_guess_dif_order_sel.rds")
+
+```
+
+### Comapre models
+
+```{r}
+loo_compare(irt1_guess_sel, irt1_guess_dif_order_sel, irt1_guess_dif_sex_sel)%>%as_tibble(rownames = "model")
+```
+
+### Visual model inspection
+
+```{r}
+dif_sex_guess <- as_draws_df(irt1_guess_dif_sex_sel)%>%
+  select(b_eta_Intercept, starts_with("r_targetWord"))%>%
+  mutate(iter = 1:n()) %>%
+  pivot_longer(starts_with("r_targetWord")) %>%
+  mutate(name = str_remove(name, pattern = "r_targetWord__eta"),
+         name = str_remove_all(name, pattern = "\\[|\\]"))%>%
+  separate(name, into = c("item", "sex"), sep = "\\,")%>%
+  mutate(sex = str_remove(sex, pattern = "sex"),
+         val =  value)%>%
+  group_by(item, sex)%>%
+  summarise(mode = estimate_mode(val),
+            uci = hdi_upper(val),
+            lci = hdi_lower(val))%>%
+  left_join(aoa%>%rename(item = targetWord))
+
+saveRDS(dif_sex_guess, "../saves/model_params_irt1_guess_dif_sex.rds")
+
+dif_sex_guess <- readRDS("../saves/model_params_irt1_guess_dif_sex.rds")
+
+ggplot(dif_sex_guess,aes(x = reorder(item, aoa_german_comb))) +
+	geom_point(aes(col = sex, y = lci), position = position_dodge(width = .5)) +
+  geom_point(aes(col = sex, y = uci), position = position_dodge(width = .5)) +
+  geom_linerange(aes(col = sex, ymin = lci + 0.1, ymax = uci-0.1), position = position_dodge(width = .5), alpha = .5) +
+	coord_flip() +
+  scale_color_colorblind(labels = c("male","female"), name = "Group")+
+	labs(x = "Item", y = "Easiness estimate")+
+  theme_few()
+```
+
+```{r}
+ggsave("../graphs/dif_ci.png", height = 10, width = 10, scale = 1)
+```
+
+```{r}
+dif_sex_guess%>%
+  pivot_wider(names_from = sex, values_from = c(mode,uci,lci))%>%
+  ggplot(., aes(x = mode_f, y = mode_m))+
+  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .75)+
+  geom_point(pch = 1, size = 2, stroke  = 1, aes(col = factor(aoa_german_comb)))+
+  geom_linerange(aes(ymin = lci_m, ymax = uci_m),  alpha = .25, lty = 1)+
+  geom_linerange(aes(xmin = lci_f, xmax = uci_f),  alpha = .25, lty = 1)+
+  geom_text(aes(label = item, x = uci_f +0.2))+
+  labs(x = "Group: female", y = "Group: male")+
+  scale_color_viridis_d()+
+  guides(col = F)+
+  coord_fixed()+
+  theme_few()
+  
+```
+
+```{r}
+ggsave("../graphs/dif_cor.png", height = 6, width = 6, scale = 1.2)
+```
+
+# Reliability
+
+## KR20
+
+```{r}
+# full test
+rel_dat <- irt_dat%>%
+  select(-sex, -order, -aoa_german_comb)%>%
+  #filter(targetWord %in% rasch_selected_items)%>%
+  group_by(subjID)%>%
+  distinct(targetWord, .keep_all = T)%>%
+  pivot_wider(names_from = targetWord, values_from = correct)%>%
+  ungroup()%>%
+  select(-subjID)
+
+kr20_rel <- kr20(rel_dat, hit = 1)
+
+kr20_rel
+
+# selected items
+
+rel_dat_sel <- irt_dat%>%
+  select(-sex, -order, -aoa_german_comb)%>%
+  filter(targetWord %in% rasch_selected_items)%>%
+  group_by(subjID)%>%
+  distinct(targetWord, .keep_all = T)%>%
+  pivot_wider(names_from = targetWord, values_from = correct)%>%
+  ungroup()%>%
+  select(-subjID)
+
+kr20_rel_sel <- kr20(rel_dat_sel, hit = 1)
+
+kr20_rel_sel
+```
+
+## Andrich Reliability
+
+```{r}
+# full task 
+pers_params <- ranef(irt1_guess)$subjID%>%as_tibble(rownames = "subjID")
+
+
+sep_rel <- 1 - 
+  (1/length(pers_params$Estimate.eta_Intercept) * sum(pers_params$Est.Error.eta_Intercept^2))/
+  (1/(length(pers_params$Estimate.eta_Intercept)-1)*sum((pers_params$Estimate.eta_Intercept - mean(pers_params$Estimate.eta_Intercept))^2))
+
+
+sep_rel
+
+# selected items only 
+pers_params_sel <- ranef(irt1_guess_sel)$subjID%>%as_tibble(rownames = "subjID")
+
+
+sep_rel_sel <- 1 - 
+  (1/length(pers_params_sel$Estimate.eta_Intercept) * sum(pers_params_sel$Est.Error.eta_Intercept^2))/
+  (1/(length(pers_params_sel$Estimate.eta_Intercept)-1)*sum((pers_params_sel$Estimate.eta_Intercept - mean(pers_params_sel$Estimate.eta_Intercept))^2))
+
+
+sep_rel_sel
+```
+
+
+# Selected items compared to random subset
+
+```{r}
+
+new_items <- data%>%filter(source == "new items")%>%distinct(targetWord)%>%pull(targetWord)
+
+cor_random <- tibble()
+
+for (j in 10:20){
+  
+for (i in 1:100) {
+  
+   sel <- sample(new_items, j)
+
+   cor <- data%>%
+      filter(targetWord %in% sel)%>%
+      group_by(subjID)%>%
+  summarise(mean_sub = mean(correct))%>%
+  right_join(full)%>%
+  summarise(cor = cor(mean_sub, mean_full))%>%
+  mutate(iter = i, 
+         size = j)
+  
+  cor_random <- bind_rows(cor_random, cor)
+}
+
+}
+  
+saveRDS(cor_random, "../saves/cor_random.rds")
+
+cor_random <- readRDS("../saves/cor_random.rds")
+
+rasch_selected_items
+```
+
+```{r}
+cor_random%>%
+  ggplot(aes(x = cor, y = factor(size)))+
+  geom_vline(xintercept = determine_size%>%filter(iter ==1, size == 22)%>%pull(correlation), lty = 3, alpha = .75)+
+  stat_binline(alpha = .75) +
+  labs(x = "Correlation subtest with full test", y = "No. of newly added items in subset")+
+  theme_few()+
+  theme(axis.ticks.y = element_blank())
+```
+```{r}
+ggsave("../graphs/rand_sel_cor.png", height = 6, width = 8, scale = 1)
+```
