@@ -42,7 +42,7 @@ data <- read_csv("../data/wonder_data.csv")
 irt_dat <- data%>%
   select(subjID, word, score, sex, aoa_rating_german)
 
-aoa <- data%>%distinct(english, .keep_all = T)%>%select(english, aoa_rating_german)
+aoa <- data%>%distinct(word, .keep_all = T)%>%select(word, aoa_rating_german)
 
 full <- data%>%
   group_by(subjID)%>%
@@ -110,7 +110,7 @@ rasch_fit_mode <- rasch_fit%>%
 rasch_fit_mode%>%
   group_by(fit_index)%>%
   mutate(group = as.factor(as.numeric(cut_number(aoa_rating_german, 6))))%>%
-  ggplot(. , aes(y = fct_reorder(english, aoa_rating_german), x = mode, col = fit_index))+
+  ggplot(. , aes(y = fct_reorder(word, aoa_rating_german), x = mode, col = fit_index))+
   geom_vline(xintercept = c(0.7, 1.3), lty = 3, alpha = .5)+
   geom_vline(xintercept = c(0.5, 1.5), lty = 2, alpha = .5)+
   geom_vline(xintercept = 1, lty = 1, alpha = .5, col = "darkgreen")+
