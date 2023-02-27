@@ -5,6 +5,8 @@
 
 data/*_raw_data/*
 
+saves/*
+
 wonder_word_list_natalia.xlsx
 
 data/.DS_Store
