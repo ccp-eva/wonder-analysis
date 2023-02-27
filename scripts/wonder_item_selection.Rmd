@@ -37,16 +37,16 @@ func <- function(x){
 ```
 
 ```{r}
-data <- read_csv("../data/clean_data.csv")
+data <- read_csv("../data/wonder_data.csv")
 
 irt_dat <- data%>%
-  select(subjID, targetWord, correct, order, sex, aoa_german_comb)
+  select(subjID, english, score, sex, aoa_rating_german)
 
-aoa <- data%>%distinct(targetWord, .keep_all = T)%>%select(targetWord, aoa_german_comb)
+aoa <- data%>%distinct(english, .keep_all = T)%>%select(english, aoa_rating_german)
 
 full <- data%>%
   group_by(subjID)%>%
-  summarise(mean_full = mean(correct))
+  summarise(mean_full = mean(score))
 ```
 
 # Models
@@ -54,100 +54,81 @@ full <- data%>%
 ## Rasch Model
 
 ```{r}
-prior_1pl_guess <- 
-  prior("normal(0, 2)", class = "b", nlpar = "eta") +
-  prior("normal(0, 1)", class = "sd", group = "subjID", nlpar = "eta") + 
-  prior("normal(0, 3)", class = "sd", group = "targetWord", nlpar = "eta")
+prior_1pl <- 
+  prior("normal(0, 1)", class = "sd", group = "subjID") + 
+  prior("normal(0, 3)", class = "sd", group = "english")
 ```
 
 
 ### Model
 
 ```{r}
-irt1_guess <- brm(
+irt1 <- brm(
   data = irt_dat,
-  family = brmsfamily("bernoulli", "identity"),
-  bf(
-    correct ~ 0.25 + 0.75 * inv_logit(eta),
-    eta ~ 1 + (1 | targetWord) + (1 | subjID),
-    nl = TRUE
-  ),
-  prior = prior_1pl_guess,
-  control = list(adapt_delta = 0.95, max_treedepth = 12),
-  cores = 6,
-  chains = 6,
-  iter = 6000,
+  family = bernoulli(),
+  score ~ 1 + (1 | english) + (1 | subjID),
+  prior = prior_1pl,
+  #control = list(adapt_delta = 0.9, max_treedepth = 12),
+  cores = 4,
+  chains = 4,
+  iter = 4000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)%>%add_criterion(c("loo","waic")) 
+)
 
 
-saveRDS(irt1_guess, "../saves/irt1_guess.rds")
+saveRDS(irt1, "../saves/irt1.rds")
 
-irt1_guess <- readRDS("../saves/irt1_guess.rds")
+irt1 <- readRDS("../saves/irt1.rds")
+
 ```
 
-### Model to extract fit indices
+### Extract fit indices
 
 ```{r}
-prior_1pl_guess <- prior("normal(0, 2)", class = "b", nlpar = "eta") +
-  prior("normal(0, 1)", class = "sd", group = "subjID", nlpar = "eta") +
-  prior("normal(0, 3)", class = "sd", group = "targetWord", nlpar = "eta")
+rasch_fit <- irt_dat%>%
+  select(-sex)%>%
+  filter(#targetWord %in% rasch_selected_items,
+         #subjID %in% c("15X7mwV1", "39tVizn3", "479FefBH")
+         )%>%
+  add_epred_draws(irt1, re_formula = ~(1 | english) + (1 | subjID), ndraws = 5000)%>%
+  mutate(zvi = (correct - .epred)/(.epred*(1-.epred))^0.5)%>%
+  group_by(english,aoa_rating_german, .draw)%>%
+  summarise(outfit = sum(zvi^2)/length(unique(subjID)),
+            infit = (sum(zvi^2*(.epred*(1-.epred)))/sum(.epred*(1-.epred))))
 
-irt1_guess_standata <- brms:::make_standata(
-  formula = bf(
-    correct ~ 0.25 + 0.75 * inv_logit(eta),
-    eta ~ 1 + (1 | targetWord) + (1 | subjID),
-    nl = TRUE
-  ),
-  data = irt_dat,
-  family = brmsfamily("bernoulli", "identity"),
-  prior = prior_1pl_guess
-)
-
-irt1_guess_itemloo <- stan(
-  file = "../analysis/irt1_guess_itemloo.stan",
-  data = irt1_guess_standata[c("N", "Y", "N_1", "J_1", "N_2", "J_2")],
-  control = list(adapt_delta = 0.95, max_treedepth = 12),
-  cores = 6,
-  chains = 6,
-  iter = 6000
-)
-
-saveRDS(irt1_guess_itemloo, "../saves/irt1_guess_itemloo.rds")
-
-irt1_guess_itemloo <- readRDS("../saves/irt1_guess_itemloo.rds")
-
-irt1_guess_itemloo_loom <- loo(irt1_guess_itemloo, pars = "loglik_m")
-
-saveRDS(irt1_guess_itemloo_loom, file = "../saves/irt1_guess_looitems_loom.rds")
-
-irt1_guess_itemloo_idxs <- irt_dat %>%
-  mutate(item_id = as.integer(factor(targetWord))) %>%
-  group_by(targetWord) %>%
-  summarize(
-    mean_correct = mean(correct),
-    item_id = unique(item_id),
-    targetWord = unique(targetWord)
-  ) %>%
-  full_join(mutate(as_tibble(irt1_guess_itemloo_loom$pointwise[, "influence_pareto_k", drop = FALSE]), item_id = row_number())) %>%
-  rename(pareto_k = influence_pareto_k) %>%
-  full_join(
-    as_draws_df(irt1_guess_itemloo) %>% 
-      select(.chain, .iteration, starts_with("infit"), starts_with("outfit"), starts_with("r_2")) %>% 
-      pivot_longer(-c(.chain, .iteration), names_pattern = "(.+)\\[([0-9]+)\\]", names_to = c(".value", "item_id")) %>% 
-      rename(threshold = r_2_eta_1) %>% 
-      mutate(item_id = as.integer(item_id)) %>% 
-      group_by(item_id) %>% 
-      summarize(across(c(infit, outfit, threshold), list(mean = mean, mode = estimate_mode, hdi_lower = hdi_lower, hdi_upper = hdi_upper)))
-  ) %>%
-  arrange(pareto_k) %>%
-  print(n = nrow(.))
-
-saveRDS(irt1_guess_itemloo_idxs, file = "../saves/irt1_guess_itemloo_idxs.rds")
-
-irt1_guess_itemloo_idxs <- readRDS(file = "../saves/irt1_guess_itemloo_idxs.rds")
+rasch_fit_mode <- rasch_fit%>%
+  pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
+  group_by(english, aoa_rating_german, fit_index)%>%
+  summarise(mode = estimate_mode(value),
+            lci = hdi_lower(value),
+            uci = hdi_upper(value))
 ```
+
+
+```{r}
+rasch_fit_mode%>%
+  ggplot(. , aes(y = fct_reorder(english, aoa_rating_german), x = mode, col = fit_index))+
+  geom_vline(xintercept = c(0.7, 1.3), lty = 3, alpha = .5)+
+  geom_vline(xintercept = c(0.5, 1.5), lty = 2, alpha = .5)+
+  geom_vline(xintercept = 1, lty = 1, alpha = .5, col = "darkgreen")+
+  geom_pointrange(aes(xmin = lci, xmax = uci))+
+  scale_fill_colorblind()+
+  scale_color_colorblind(name = "Fit index")+
+    labs(x = "Index value", y = "Target word (sorted by rated age of acquisition)")+
+  #facet_grid(~fit_index)+
+  scale_x_continuous(breaks = c(0,0.5, 07, 1, 1.3, 1.5), labels = c(0,0.5, 07, 1, 1.3, 1.5), limits = c(0,7))+
+  theme_bw()+
+  theme(legend.position = c(0.8,0.8))
+```
+
+
+
+
+
+
+
+
 
 ## 2PL Model
 
