@@ -40,7 +40,7 @@ func <- function(x){
 data <- read_csv("../data/wonder_data.csv")
 
 irt_dat <- data%>%
-  select(subjID, english, score, sex, aoa_rating_german)
+  select(subjID, word, score, sex, aoa_rating_german)
 
 aoa <- data%>%distinct(english, .keep_all = T)%>%select(english, aoa_rating_german)
 
@@ -56,7 +56,7 @@ full <- data%>%
 ```{r}
 prior_1pl <- 
   prior("normal(0, 1)", class = "sd", group = "subjID") + 
-  prior("normal(0, 3)", class = "sd", group = "english")
+  prior("normal(0, 3)", class = "sd", group = "word")
 ```
 
 
@@ -66,7 +66,7 @@ prior_1pl <-
 irt1 <- brm(
   data = irt_dat,
   family = bernoulli(),
-  score ~ 1 + (1 | english) + (1 | subjID),
+  score ~ 1 + (1 | word) + (1 | subjID),
   prior = prior_1pl,
   #control = list(adapt_delta = 0.9, max_treedepth = 12),
   cores = 4,
@@ -91,15 +91,15 @@ rasch_fit <- irt_dat%>%
   filter(#targetWord %in% rasch_selected_items,
          #subjID %in% c("15X7mwV1", "39tVizn3", "479FefBH")
          )%>%
-  add_epred_draws(irt1, re_formula = ~(1 | english) + (1 | subjID), ndraws = 5000)%>%
-  mutate(zvi = (correct - .epred)/(.epred*(1-.epred))^0.5)%>%
-  group_by(english,aoa_rating_german, .draw)%>%
+  add_epred_draws(irt1, re_formula = ~(1 | word) + (1 | subjID), ndraws = 100)%>%
+  mutate(zvi = (score - .epred)/(.epred*(1-.epred))^0.5)%>%
+  group_by(word,aoa_rating_german, .draw)%>%
   summarise(outfit = sum(zvi^2)/length(unique(subjID)),
             infit = (sum(zvi^2*(.epred*(1-.epred)))/sum(.epred*(1-.epred))))
 
 rasch_fit_mode <- rasch_fit%>%
   pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
-  group_by(english, aoa_rating_german, fit_index)%>%
+  group_by(word, aoa_rating_german, fit_index)%>%
   summarise(mode = estimate_mode(value),
             lci = hdi_lower(value),
             uci = hdi_upper(value))
@@ -108,6 +108,8 @@ rasch_fit_mode <- rasch_fit%>%
 
 ```{r}
 rasch_fit_mode%>%
+  group_by(fit_index)%>%
+  mutate(group = as.factor(as.numeric(cut_number(aoa_rating_german, 6))))%>%
   ggplot(. , aes(y = fct_reorder(english, aoa_rating_german), x = mode, col = fit_index))+
   geom_vline(xintercept = c(0.7, 1.3), lty = 3, alpha = .5)+
   geom_vline(xintercept = c(0.5, 1.5), lty = 2, alpha = .5)+
@@ -116,16 +118,38 @@ rasch_fit_mode%>%
   scale_fill_colorblind()+
   scale_color_colorblind(name = "Fit index")+
     labs(x = "Index value", y = "Target word (sorted by rated age of acquisition)")+
-  #facet_grid(~fit_index)+
-  scale_x_continuous(breaks = c(0,0.5, 07, 1, 1.3, 1.5), labels = c(0,0.5, 07, 1, 1.3, 1.5), limits = c(0,7))+
+  facet_wrap(~group, scales = "free_y", nrow = 2)+
+  #scale_x_continuous(breaks = c(0,0.5, 07, 1, 1.3, 1.5), labels = c(0,0.5, 07, 1, 1.3, 1.5), limits = c(0,7))+
   theme_bw()+
-  theme(legend.position = c(0.8,0.8))
+  theme(legend.position = c(0.95,0.8))
+```
+
+```{r}
+ggsave("../graphs/in_outfit.png", height = 8, width = 16, scale = 1.5)
 ```
 
 
-
-
-
+```{r}
+rasch_fit_mode%>%
+  filter(0.7 < mode & 1.3 > mode)%>%
+  group_by(english)%>%
+  mutate(n = n())%>%
+  filter(n == 2)%>%
+  ungroup()%>%
+  mutate(group = as.factor(as.numeric(cut_number(aoa_rating_german, 6))))%>%
+  ggplot(. , aes(y = fct_reorder(english, aoa_rating_german), x = mode, col = fit_index))+
+  geom_vline(xintercept = c(0.7, 1.3), lty = 3, alpha = .5)+
+  geom_vline(xintercept = c(0.5, 1.5), lty = 2, alpha = .5)+
+  geom_vline(xintercept = 1, lty = 1, alpha = .5, col = "darkgreen")+
+  geom_pointrange(aes(xmin = lci, xmax = uci))+
+  scale_fill_colorblind()+
+  scale_color_colorblind(name = "Fit index")+
+    labs(x = "Index value", y = "Target word (sorted by rated age of acquisition)")+
+  facet_wrap(~group, scales = "free_y", nrow = 2)+
+  #scale_x_continuous(breaks = c(0,0.5, 07, 1, 1.3, 1.5), labels = c(0,0.5, 07, 1, 1.3, 1.5), limits = c(0,7))+
+  theme_bw()+
+  theme(legend.position = c(0.95,0.8))
+```
 
 
 
@@ -146,16 +170,16 @@ irt2PL <- brm(
   data = irt_dat,
   family = brmsfamily("bernoulli", "identity"),
   bf(
-    correct ~ 0.25 + 0.75 * inv_logit(exp(logalpha) * eta),
+    correct ~ inv_logit(exp(logalpha) * eta),
     eta ~ 1 + (1 |i| targetWord) + (1 | subjID),
     logalpha ~ 1 + (1 |i| targetWord),
     nl = TRUE
   ),
   prior = prior_va_2pl,
   control = list(adapt_delta = 0.95, max_treedepth = 12),
-  cores = 6,
-  chains = 6,
-  iter = 6000,
+  cores = 4,
+  chains = 4,
+  iter = 4000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
 )%>%add_criterion(c("loo","waic")) 
@@ -163,18 +187,16 @@ irt2PL <- brm(
 saveRDS(irt2PL, "../saves/irt2PL.rds")
 
 irt2PL <- readRDS("../saves/irt2PL.rds")
-
-coef2PL <- coef(irt2PL)
 ```
 
 # Indices
 
 ```{r}
-items <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(targetWord)
-easiness_rasch <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(threshold_mode)
+items <- length(unique(data$word))
+easiness_rasch <- ranef(irt1)$word%>%as_tibble(rownames = "item") %>%pull(Estimate.Intercept)
 infit <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>% pull(infit_mode)
 outfit <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(outfit_mode)
-disc_2PL <- coef2PL$targetWord[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
+disc_2PL <- coef(irt2PL)$targetWord[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
 pkd <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(pareto_k)
 
 ```
