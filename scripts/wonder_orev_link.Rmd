@@ -67,7 +67,7 @@ ggplot(link_data_select, aes(x = wonder, y = orev))+
 ```{r}
 orev_d <- read_csv("../../vocab/data/clean_data.csv")%>%
   filter(targetWord %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
-  group_by(age,subjID)%>%
+  group_by(subjID)%>%
   summarise(orev = mean(correct))
 
 wonder_d <- data%>%

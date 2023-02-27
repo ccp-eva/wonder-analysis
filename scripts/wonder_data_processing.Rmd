@@ -69,7 +69,8 @@ read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjähri
 read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =2),
 read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =3),
 read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =4),
-read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =5)
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =5),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =6)
 )%>%
   dplyr::select(Code, Geburtsdatum, Geschlecht)%>%
   distinct(Code, Geburtsdatum, Geschlecht, .keep_all = T)%>%
@@ -77,16 +78,18 @@ read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjähri
          birth_day = Geburtsdatum)%>%
   mutate(birth_day = as.Date(birth_day,"%d.%m.%Y"), 
          sex = ifelse(Geschlecht == "Männlich", "m", "f"))
+
 ```
 
 ```{r}
 data <- filtered_data%>%
+  distinct(subjID, word, .keep_all = T)%>%
   left_join(dem)%>%
   mutate(age = as.numeric(difftime(test_day, birth_day, "days")/365.25))%>%
   dplyr::select(-test_day, -birth_day, -Geschlecht)%>%
   group_by(subjID)%>%
   mutate(n = n())%>%
-  filter(n == 379)%>%
+  filter(n == 379, subjID != "testID", !is.na(sex))%>%
   dplyr::select(-n)%>%
   ungroup()
  
@@ -94,12 +97,11 @@ write_csv(data, "../data/wonder_data.csv")
 ```
 
 ```{r}
-# reminder
+# orev link
 complete <- data%>%
-  group_by(subjID, age)%>%
+  group_by(subjID)%>%
   summarise(n = n())%>%
-  mutate(complete = ifelse(n == 379, "yes", "no"), 
-         age_group = substr(age, 1, 1))%>%
+  mutate(complete = ifelse(n == 379, "yes", "no"))%>%
   filter(complete == "yes")%>%
   pull(subjID)
 
@@ -109,10 +111,14 @@ read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjähri
 read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =2),
 read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =3),
 read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =4),
-read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =5)
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =5),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =6)
 ) %>%
-  filter(!Code %in% complete)%>%
-  write_xlsx(., "../data/wonder_raw_data/wonder_reminder_2.xlsx")
+  filter(Code %in% complete)%>%
+  distinct(`ID Nr.`, .keep_all = T)%>%
+  select(`ID Nr.`	,Nachname,	Vorname,	Geschlecht,	Geburtsdatum,	Code	,Email	, Email_1,	Email_2)%>%
+  write_xlsx(., "../data/wonder_raw_data/wonder_orev.xlsx")
+
 ```
 
 
