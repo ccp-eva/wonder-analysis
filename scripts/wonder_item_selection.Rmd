@@ -68,15 +68,15 @@ irt1 <- brm(
   family = bernoulli(),
   score ~ 1 + (1 | word) + (1 | subjID),
   prior = prior_1pl,
-  #control = list(adapt_delta = 0.9, max_treedepth = 12),
-  cores = 4,
-  chains = 4,
-  iter = 4000,
+  control = list(adapt_delta = 0.9, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
 )
 
-irt1 <- add_criterion(irt1,criterion = "loo") 
+irt1 <- add_criterion(irt1,criterion = c("loo", "waic")) 
 
 saveRDS(irt1, "../saves/irt1.rds")
 
@@ -162,8 +162,8 @@ prior_va_2pl <-
   prior("normal(0, 2)", class = "b", nlpar = "eta") +
   prior("normal(0, 1)", class = "b", nlpar = "logalpha") +
   prior("normal(0, 1)", class = "sd", group = "subjID", nlpar = "eta") + 
-  prior("normal(0, 3)", class = "sd", group = "targetWord", nlpar = "eta") +
-  prior("normal(0, 1)", class = "sd", group = "targetWord", nlpar = "logalpha")
+  prior("normal(0, 3)", class = "sd", group = "word", nlpar = "eta") +
+  prior("normal(0, 1)", class = "sd", group = "word", nlpar = "logalpha")
 ```
 
 ```{r}
@@ -171,19 +171,22 @@ irt2PL <- brm(
   data = irt_dat,
   family = brmsfamily("bernoulli", "identity"),
   bf(
-    correct ~ inv_logit(exp(logalpha) * eta),
-    eta ~ 1 + (1 |i| targetWord) + (1 | subjID),
-    logalpha ~ 1 + (1 |i| targetWord),
+    score ~ inv_logit(exp(logalpha) * eta),
+    eta ~ 1 + (1 |i| word) + (1 | subjID),
+    logalpha ~ 1 + (1 |i| word),
     nl = TRUE
   ),
   prior = prior_va_2pl,
-  control = list(adapt_delta = 0.95, max_treedepth = 12),
-  cores = 4,
-  chains = 4,
-  iter = 4000,
+  control = list(adapt_delta = 0.9, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
+  warmup = 2000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)%>%add_criterion(c("loo","waic")) 
+)
+
+irt2PL <- add_criterion(irt2PL,criterion = c("loo", "waic")) 
 
 saveRDS(irt2PL, "../saves/irt2PL.rds")
 
@@ -397,7 +400,7 @@ simulated_annealing_rasch <- function(k, cooling_ratio=0.999, reset_thresh=1000,
 
 ```{r, message=F, warning=F, comment=F}
 
-sim_rasch_test <- simulated_annealing_rasch(100)
+sim_rasch_test <- simulated_annealing_rasch(10)
 
 sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
 
