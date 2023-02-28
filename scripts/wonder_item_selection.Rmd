@@ -37,7 +37,8 @@ func <- function(x){
 ```
 
 ```{r}
-data <- read_csv("../data/wonder_data.csv")
+data <- read_csv("../data/wonder_data.csv")%>%
+  mutate(age_group = factor(substr(age, 1,1)))
 
 irt_dat <- data%>%
   select(subjID, word, score, sex, aoa_rating_german)
@@ -102,6 +103,11 @@ rasch_fit_mode <- rasch_fit%>%
   summarise(mode = estimate_mode(value),
             lci = hdi_lower(value),
             uci = hdi_upper(value))
+
+saveRDS(rasch_fit_mode, "../saves/rasch_fit_mode.rds")
+
+rasch_fit_mode <- readRDS("../saves/rasch_fit_mode.rds")
+
 ```
 
 
@@ -402,7 +408,6 @@ sim_rasch_test <- simulated_annealing_rasch(100)
 sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
 
 sub_rasch_test <- data%>%
-  mutate(age_group = factor(substr(age, 1,1)))%>%
   filter(word %in% sel_items_rasch_test,
          )%>%
   group_by(age_group,subjID)%>%
@@ -418,6 +423,7 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
   ylim(0,1.02)+
   xlim(0,1.02)+
   theme_few()
+
 ```
 
 ## Check variation in score
@@ -425,9 +431,9 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
 ```{r, warning=FALSE}
 sim_score_rasch <- tibble()
 
-for (i in 5:40) {
+for (i in c(50,100,150,200,250)) {
   
-  for (j in 1:5) {
+  for (j in 1:2) {
   
    sim <- simulated_annealing_rasch(i)
   
@@ -440,13 +446,88 @@ for (i in 5:40) {
   
 }
 
-saveRDS(sim_score_rasch, "../saves/variation_in_score.rds")
+#saveRDS(sim_score_rasch, "../saves/variation_in_score.rds")
 
 sim_score_rasch%>%
   ggplot(aes(x = size, y = score, group = iter))+
   geom_point(pch = 1)+
   theme_minimal()
 ```
+
+## Correlation by age and size
+
+```{r}
+cor_age <- tibble()
+
+#for (j in 1:5) {
+  
+for (i in c(50,75, 100,125,150,175,200,225,250)) {
+  
+   sim <- simulated_annealing_rasch(i)
+  
+    sel <- items[unlist(sim$best_subset) == TRUE]
+
+
+    cor <- data%>%
+      filter(word %in% sel)%>%
+      group_by(age_group,subjID)%>%
+  summarise(mean_sub = mean(score))%>%
+  right_join(full)%>%
+  group_by(age_group)%>%
+  summarise(cor = cor(mean_sub, mean_full))%>%
+  mutate(size = i, 
+         iter = j)
+  
+  cor_age <- bind_rows(cor_age, cor)
+}
+
+#}
+  
+saveRDS(cor_age_sex, "../saves/cor_age_sex.rds")
+
+cor_age_sex <- readRDS("../saves/cor_age_sex.rds")
+
+ggplot(cor_age, aes(x = size, y = cor,col = age_group))+
+  geom_point()+
+  geom_line(aes(group = age_group))+
+  ylim(0.5,1)+
+  theme_bw()
+```
+
+## Word type by size
+
+```{r}
+type_size <- tibble()
+
+for (j in 3:10) {
+  
+for (i in c(50,75, 100,125,150,175,200,225,250, 275, 300)) {
+  
+   sim <- simulated_annealing_rasch(i)
+  
+   sel <- items[unlist(sim$best_subset) == TRUE]
+
+    type <- data%>%
+      distinct(word, word_type)%>%
+      filter(word %in% sel)%>%
+      group_by(word_type)%>%
+      summarise(prop_type = n()/length(sel))%>%
+      mutate(size = i, iter = j)
+  
+  type_size <- bind_rows(type_size, type)
+}
+  
+}
+
+
+ggplot(type_size, aes(x = size, y = prop_type, col = word_type))+
+  geom_point()+
+  geom_line(aes(group = interaction(word_type,iter)))+
+  scale_color_colorblind()+
+  theme_bw()
+```
+
+
 
 ## Determine size
 
@@ -511,11 +592,11 @@ ggsave("../graphs/item_sel.png", height = 6, width = 10, scale = 1)
 ## Correlation by age and size
 
 ```{r}
-cor_age_sex <- tibble()
+cor_age <- tibble()
 
-for (j in 1:5) {
+#for (j in 1:5) {
   
-for (i in 10:40) {
+for (i in c(50,75, 100,125,150,175,200,225,250)) {
   
    sim <- simulated_annealing_rasch(i)
   
@@ -523,23 +604,29 @@ for (i in 10:40) {
 
 
     cor <- data%>%
-      filter(targetWord %in% sel)%>%
-      group_by(age_group,sex,subjID)%>%
-  summarise(mean_sub = mean(correct))%>%
+      filter(word %in% sel)%>%
+      group_by(age_group,subjID)%>%
+  summarise(mean_sub = mean(score))%>%
   right_join(full)%>%
-  group_by(sex, age_group)%>%
+  group_by(age_group)%>%
   summarise(cor = cor(mean_sub, mean_full))%>%
   mutate(size = i, 
          iter = j)
   
-  cor_age_sex <- bind_rows(cor_age_sex, cor)
+  cor_age <- bind_rows(cor_age, cor)
 }
 
-}
+#}
   
 saveRDS(cor_age_sex, "../saves/cor_age_sex.rds")
 
 cor_age_sex <- readRDS("../saves/cor_age_sex.rds")
+
+ggplot(cor_age, aes(x = size, y = cor,col = age_group))+
+  geom_point()+
+  geom_line(aes(group = age_group))+
+  ylim(0.5,1)+
+  theme_bw()
 ```
 
 
