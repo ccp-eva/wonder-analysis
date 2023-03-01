@@ -436,11 +436,14 @@ sim_rasch_test <- simulated_annealing_rasch(10)
 
 sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
 
+
+sel_items <- sample(unique(data$word), 10)
+
 sub_subj <- sample(unique(data$subjID), 10)
 
 
 small_data <- data%>%
-  filter(word %in% sel_items_rasch_test, 
+  filter(word %in% sel_items, 
          subjID %in% sub_subj)
 
 irt1_small <- brm(
