@@ -69,7 +69,7 @@ irt1 <- brm(
   family = bernoulli(),
   score ~ 1 + (1 | word) + (1 | subjID),
   prior = prior_1pl,
-  control = list(adapt_delta = 0.9, max_treedepth = 12),
+  #control = list(adapt_delta = 0.9, max_treedepth = 12),
   cores = 6,
   chains = 6,
   iter = 6000,
@@ -183,13 +183,13 @@ irt2PL <- brm(
     nl = TRUE
   ),
   prior = prior_va_2pl,
-  control = list(adapt_delta = 0.9, max_treedepth = 12),
+  #control = list(adapt_delta = 0.9, max_treedepth = 12),
   cores = 6,
   chains = 6,
   iter = 6000,
-  warmup = 2000,
-  threads = threading(8), #to speed things up, comment out if not on a cluster
-  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+  #warmup = 2000,
+  #threads = threading(8), #to speed things up, comment out if not on a cluster
+  #backend = "cmdstanr" #to speed things up, comment out if not on a cluster
 )
 
 irt2PL <- add_criterion(irt2PL,criterion = c("loo", "waic")) 
@@ -428,6 +428,62 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
   theme_few()
 
 ```
+
+## LOO debugging
+
+```{r}
+sim_rasch_test <- simulated_annealing_rasch(10)
+
+sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
+
+sub_subj <- sample(unique(data$subjID), 10)
+
+
+small_data <- data%>%
+  filter(word %in% sel_items_rasch_test, 
+         subjID %in% sub_subj)
+
+irt1_small <- brm(
+  data = small_data,
+  family = bernoulli(),
+  score ~ 1 + (1 | word) + (1 | subjID),
+  prior = prior_1pl,
+  control = list(adapt_delta = 0.9, max_treedepth = 12),
+  cores = 4,
+  chains = 4,
+  iter = 4000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)
+
+irt1_small <- add_criterion(irt1_small,criterion = c("loo", "waic")) 
+
+irt2PL_small <- brm(
+  data = small_data,
+  family = brmsfamily("bernoulli", "identity"),
+  bf(
+    score ~ inv_logit(exp(logalpha) * eta),
+    eta ~ 1 + (1 |i| word) + (1 | subjID),
+    logalpha ~ 1 + (1 |i| word),
+    nl = TRUE
+  ),
+  prior = prior_va_2pl,
+  control = list(adapt_delta = 0.9, max_treedepth = 12),
+  cores = 4,
+  chains = 4,
+  iter = 4000,
+ # threads = threading(8), #to speed things up, comment out if not on a cluster
+#  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)
+
+irt2PL_small <- add_criterion(irt2PL_small,criterion = c("loo", "waic")) 
+
+
+loo_compare(irt1_small, irt2PL_small)
+
+```
+
+
 
 ## Check variation in score
 
