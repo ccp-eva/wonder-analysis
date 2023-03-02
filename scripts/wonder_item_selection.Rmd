@@ -212,68 +212,6 @@ outfit <- rasch_fit_mode %>% filter(fit_index == "outfit")%>%arrange(word)%>% pu
 
 # Item selection
 
-## Score
-
-```{r}
-score_dist <- tibble()
-
-for (j in 1:16) {
-  
-for (i in 50:35) {
-  
-  x <- sample(easiness_rasch, i)
-  
-	nn_dists <- rep(0, length(x)-1)
-	
-	for(k in 1:length(x)-1) {
-		nn_dists[k] <- x[k+1] - x[k]
-	}
-	
-	x2 <- sample(disc_2PL, i)
-  x_dist2 <- unlist(lapply(x2, func))
-  
-  x3 <- sample(infit, i)
-  x_dist3 <- unlist(lapply(x3, func))
-
-  x4 <- sample(outfit, i)
-  x_dist4 <- unlist(lapply(x4, func))
-  
-
-
-  mean_spacing <- -1*sd(nn_dists)/3
-  var_2PL <- -1*var(x_dist2)*10
-  mean_infit <- -2*mean(x_dist3)
-  mean_outfit <- -4*mean(x_dist4)
-
-  sum_score = mean_spacing + mean_infit + mean_outfit+ var_2PL +mean_pkd
-  
-	row <- tibble(iter = j,
-                size = i, 
-                spacing = mean_spacing,
-	              infit = mean_infit,
-	              outfit = mean_outfit,
-	              var_2PL_disc = var_2PL, 
-	              pkd = mean_pkd, 
-	              score = sum_score)
-	
-  score_dist <- bind_rows(score_dist,row)
-}
-}
-
-score_dist%>%
-  pivot_longer(cols = c(-size, -iter), names_to = "type", values_to = "value")%>%
-  ggplot(aes(x = factor(size), y = value, col = type))+
-  geom_point(pch = 1)+
-  facet_wrap(~iter)+
-  ggtitle("Score = spacing + infit + outfit+ var_2PL_disc + pkd")+
-  theme_bw()
-
-```
-
-```{r}
-ggsave("../graphs/score.png", height = 12, width = 16, scale = 1)
-```
-
 ## Simulated annealing algorithm
 
 ```{r}
@@ -406,7 +344,7 @@ simulated_annealing_rasch <- function(k, cooling_ratio=0.999, reset_thresh=1000,
 
 ```{r, message=F, warning=F, comment=F}
 
-sim_rasch_test <- simulated_annealing_rasch(10)
+sim_rasch_test <- simulated_annealing_rasch(50)
 
 sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
 
@@ -428,6 +366,34 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
   theme_few()
 
 ```
+
+## Person parameters by size
+
+```{r}
+irt1_50 <- brm(
+  data = irt_dat,
+  family = bernoulli(),
+  score ~ 1 + (1 | word) + (1 | subjID),
+  prior = prior_1pl,
+  #control = list(adapt_delta = 0.9, max_treedepth = 12),
+  cores = 6,
+  chains = 6,
+  iter = 6000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)
+```
+
+
+```{r}
+persparams <- ranef(irt1)$subjID%>%as_tibble(rownames = "subjID")%>%mutate(model = "full")
+
+ggplot(persparams, aes(x = Estimate.Intercept, y = reorder(subjID, Estimate.Intercept)))+
+  geom_pointrange(aes(xmin = Q2.5.Intercept, xmax = Q97.5.Intercept), alpha = 0.2)+
+  theme_minimal()+
+  theme(axis.text.y = element_blank())
+```
+
 
 ## LOO debugging
 

@@ -43,8 +43,25 @@ filtered_data <- raw_data%>%
   filter(!subjID %in% exlcude$subjID)%>%
   mutate(test_day = substr(timestamp, 0,10),
          test_day = as.Date(test_day,"%Y-%m-%d"))%>%
-  mutate(correct = ifelse(targetWord == chosenWord, 1,0))
+  mutate(correct = ifelse(targetWord == chosenWord, 1,0))%>%
+  distinct(subjID, trial, .keep_all = T)
 
 
 write_csv(filtered_data, "../data/orev_data.csv")
 ```
+
+```{r}
+filtered_data%>%left_join(
+  read_csv("../data/wonder_data.csv")%>%distinct(subjID, .keep_all = T)%>%select(subjID,age)
+)%>%mutate(age_group = substr(age, 1,1))%>%
+  filter(!is.na(age_group))%>%
+  summarise(n = n_distinct(subjID))
+
+filtered_data%>%left_join(
+  read_csv("../data/wonder_data.csv")%>%distinct(subjID, .keep_all = T)%>%select(subjID,age)
+)%>%mutate(age_group = substr(age, 1,1))%>%
+  filter(!is.na(age_group))%>%
+  group_by(age_group)%>%
+  summarise(n = n_distinct(subjID))
+```
+
