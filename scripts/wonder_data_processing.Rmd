@@ -59,7 +59,8 @@ filtered_data <- raw_data%>%
          test_day = as.Date(test_day,"%Y-%m-%d"))%>%
   dplyr::select(-timestamp)%>%
   rename(word_type = pos)%>%
-  right_join(read_xlsx("../data/wonder_full_list.xlsx")%>%rename(word = german))
+  right_join(read_xlsx("../data/wonder_full_list.xlsx")%>%rename(word = german))%>%
+  mutate(subjID = ifelse(subjID == "CDXfHE87", "oTsf2xKY", subjID))
 
 ```
 
@@ -91,7 +92,8 @@ data <- filtered_data%>%
   mutate(n = n())%>%
   filter(n == 379, subjID != "testID", !is.na(sex))%>%
   dplyr::select(-n)%>%
-  ungroup()
+  ungroup()%>%
+  filter(subjID != "tGCnD9nu")
  
 write_csv(data, "../data/wonder_data.csv") 
 ```

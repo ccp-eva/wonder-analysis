@@ -44,7 +44,9 @@ filtered_data <- raw_data%>%
   mutate(test_day = substr(timestamp, 0,10),
          test_day = as.Date(test_day,"%Y-%m-%d"))%>%
   mutate(correct = ifelse(targetWord == chosenWord, 1,0))%>%
-  distinct(subjID, trial, .keep_all = T)
+  distinct(subjID, trial, .keep_all = T)%>%
+  filter(subjID != "tGCnD9nu")%>%
+  mutate(subjID = ifelse(subjID == "CDXfHE87", "oTsf2xKY", subjID))
 
 
 write_csv(filtered_data, "../data/orev_data.csv")
@@ -63,5 +65,6 @@ filtered_data%>%left_join(
   filter(!is.na(age_group))%>%
   group_by(age_group)%>%
   summarise(n = n_distinct(subjID))
+
 ```
 

@@ -31,17 +31,28 @@ link_data <- wonder_data%>%
   ungroup()%>%
   distinct(subjID, .keep_all = T)
 
+sel_items <- readRDS("../saves/determine_size.rds")%>%
+  filter(size == 150)%>%
+  distinct(iter,items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(150)%>%
+  pull(items)
+
 link_data_select <- wonder_data%>%
-  filter(english %in% orev_data$targetWord)%>%
+  filter(word %in% sel_items)%>%
   group_by(age, subjID)%>%
-  summarise(wonder = sum(score))%>%
+  summarise(wonder = mean(score))%>%
   left_join(orev_data%>%
               group_by(subjID)%>%
-              summarise(orev = sum(correct)))%>%
+              summarise(orev = mean(correct)))%>%
   mutate(age_group = substr(age, 1,1))%>%
   filter(!is.na(orev))%>%
   ungroup()%>%
   distinct(subjID, .keep_all = T)
+
 
 ```
 
@@ -65,8 +76,12 @@ ggplot(link_data_select, aes(x = wonder, y = orev))+
   geom_point(pch = 1, alpha = .5)+
   stat_cor()+
   #facet_grid(~age_group)+
-  lims(x = c(0,22), y = c(0,22))+
+  lims(x = c(0,1), y = c(0,1))+
   theme_bw()
+```
+
+```{r}
+ppcor::pcor.test(link_data_select$wonder, link_data_select$orev, link_data_select$age)
 ```
 
 ```{r}
@@ -81,7 +96,8 @@ m_won_orev <- wonder_data%>%
   filter(!is.na(orev))%>%
   ungroup()%>%
   mutate(age = scale(age),
-         orev = scale(orev))
+         orev = scale(orev))%>%
+  filter(subjID != "tGCnD9nu")
   
 
 m1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = m_won_orev, chains = 4, cores = 4)
@@ -109,7 +125,8 @@ wonder_d%>%
   stat_cor()+
   lims(x = c(0,1), y = c(0,1))+
   theme_bw()
-
+```
+```{r}
 orev_wonder <- wonder_d%>%
   left_join(orev_d)%>%
   filter(!is.na(orev))%>%
@@ -117,6 +134,9 @@ orev_wonder <- wonder_d%>%
 
 ppcor::pcor.test(orev_wonder$wonder, orev_wonder$orev, orev_wonder$age)
 
+```
+
+```{r}
 om_won_orev <- wonder_data%>%
   group_by(age, subjID)%>%
   summarise(sum  = sum(score),
@@ -130,3 +150,35 @@ om_won_orev <- wonder_data%>%
 
 om1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = om_won_orev, chains = 4, cores = 4)
 ```
+
+
+
+```{r}
+library(tidybayes)
+
+bind_rows(
+m1 %>%
+  gather_draws(b_age, b_orev)%>%
+  mutate(Predictor = recode(.variable,
+                        b_age = "Age",
+                        b_orev = "oREV score"),
+         Predictor = factor(Predictor, levels = c("Age","oREV score")),
+         time = "Concurrent"),
+om1 %>%
+  gather_draws(b_age, b_orev)%>%
+  mutate(Predictor = recode(.variable,
+                        b_age = "Age",
+                        b_orev = "oREV score"),
+         Predictor = factor(Predictor, levels = c("Age","oREV score")),
+         time = "1 year ago"))%>%
+  ggplot(aes(y = time, x = .value, fill = Predictor)) +
+  stat_halfeye(alpha = .7, .width = c(.95, .80)) +
+    labs(x = "Model Estimate", y ="")+
+  #guides(fill = F)+
+  #ggtitle("DV: Reaction Time (25m)")+
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  xlim(-0.1,0.4)+
+  scale_fill_colorblind(name = "Predictor")+
+  theme_bw()
+```
+
