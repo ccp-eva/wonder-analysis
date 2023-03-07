@@ -358,7 +358,7 @@ source("../scripts/helper/simulated_annealing.R")
 
 ```{r, message=F, warning=F, comment=F}
 
-sim_rasch_test <- simulated_annealing_rasch(10)
+sim_rasch_test <- simulated_annealing_rasch(50)
 
 sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
 
@@ -380,8 +380,6 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
   theme_few()
 
 ```
-
-## Determine size
 
 ### Person parameters
 
@@ -472,74 +470,6 @@ readRDS("../saves/model_comparison.rds")
 ```
 
 
-## Check variation in score
-
-```{r, warning=FALSE}
-sim_score_rasch <- tibble()
-
-for (i in c(50,100,150,200,250)) {
-  
-  for (j in 1:2) {
-  
-   sim <- simulated_annealing_rasch(i)
-  
-   score <- tibble(score = sim$best_score, 
-                   size = i,
-                   iter = j)
-   
-   sim_score_rasch <- bind_rows(sim_score_rasch, score)
-  }
-  
-}
-
-#saveRDS(sim_score_rasch, "../saves/variation_in_score.rds")
-
-sim_score_rasch%>%
-  ggplot(aes(x = size, y = score, group = iter))+
-  geom_point(pch = 1)+
-  theme_minimal()
-```
-
-## Correlation by age and size
-
-```{r}
-cor_age <- tibble()
-
-#for (j in 1:5) {
-  
-for (i in c(50,75, 100,125,150,175,200,225,250)) {
-  
-   sim <- simulated_annealing_rasch(i)
-  
-    sel <- items[unlist(sim$best_subset) == TRUE]
-
-
-    cor <- data%>%
-      filter(word %in% sel)%>%
-      group_by(age_group,subjID)%>%
-  summarise(mean_sub = mean(score))%>%
-  right_join(full)%>%
-  group_by(age_group)%>%
-  summarise(cor = cor(mean_sub, mean_full))%>%
-  mutate(size = i, 
-         iter = j)
-  
-  cor_age <- bind_rows(cor_age, cor)
-}
-
-#}
-  
-saveRDS(cor_age_sex, "../saves/cor_age_sex.rds")
-
-cor_age_sex <- readRDS("../saves/cor_age_sex.rds")
-
-ggplot(cor_age, aes(x = size, y = cor,col = age_group))+
-  geom_point()+
-  geom_line(aes(group = age_group))+
-  ylim(0.5,1)+
-  theme_bw()
-```
-
 ## Word type by size
 
 ```{r}
@@ -573,107 +503,6 @@ ggplot(type_size, aes(x = size, y = prop_type, col = word_type))+
   theme_bw()
 ```
 
-
-
-## Determine size
-
-```{r}
-# #determine_size <- tibble()
-#   
-#   for(j in 5:5){
-#   
-#   for (i in c(36:40)) {
-#     
-#     sim <- simulated_annealing_rasch(i)
-#     
-#     sel <- items[unlist(sim$best_subset) == TRUE]
-#     
-#     sub_dat <- irt_dat%>%filter(targetWord %in% sel)
-#   
-#     m1PL <- update(irt1_guess, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo"))
-#   	m3PL <- update(irt2PL, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo")) 
-#   	
-#   	comp <- loo_compare(m1PL, m3PL)%>%as_tibble(rownames = "model")%>%filter(model == "m1PL")%>%mutate(ratio = abs(elpd_diff)/(2*se_diff))
-#   	
-#   	sub_dat_cor <- sub_dat%>%
-#   	  group_by(subjID)%>%
-#   	  summarise(mean_sub = mean(correct))
-#   
-#   	cor <- cor(sub_dat_cor$mean_sub,full$mean_full)
-#   	
-#   	row <- tibble(size = i, 
-#            iter = j,
-#            elpd_diff = as.numeric(comp%>%pull(elpd_diff)),
-#            se_diff = as.numeric(comp%>%pull(se_diff)),
-#            ratio = as.numeric(comp%>%pull(ratio)),
-#            correlation = cor)
-#     
-#     determine_size <- bind_rows(determine_size, row)
-#     
-#     saveRDS(determine_size, "../saves/determine_size.rds")
-#   }
-#   
-#   }
-#   
-# saveRDS(determine_size, "../saves/determine_size.rds")
-
-determine_size <- readRDS("../saves/determine_size.rds")
-
-determine_size%>%
-  mutate(ratio = ifelse(elpd_diff == 0,0,ratio))%>%
-  pivot_longer(cols = c(ratio, correlation), names_to = "type",values_to = "value")%>% 
-  ggplot(aes(x = factor(size), y = value))+
-  geom_point(pch = 1)+
-  #geom_line()+
-  facet_grid(type~. , scales = "free_y")+
-  theme_bw()+
-  labs(x = "No. of items", y = "Comparison value", title = "ratio = abs(elpd_diff)/(2*se_diff)")
-
-```
-
-```{r}
-ggsave("../graphs/item_sel.png", height = 6, width = 10, scale = 1)
-```
-
-## Correlation by age and size
-
-```{r}
-cor_age <- tibble()
-
-#for (j in 1:5) {
-  
-for (i in c(50,75, 100,125,150,175,200,225,250)) {
-  
-   sim <- simulated_annealing_rasch(i)
-  
-    sel <- items[unlist(sim$best_subset) == TRUE]
-
-
-    cor <- data%>%
-      filter(word %in% sel)%>%
-      group_by(age_group,subjID)%>%
-  summarise(mean_sub = mean(score))%>%
-  right_join(full)%>%
-  group_by(age_group)%>%
-  summarise(cor = cor(mean_sub, mean_full))%>%
-  mutate(size = i, 
-         iter = j)
-  
-  cor_age <- bind_rows(cor_age, cor)
-}
-
-#}
-  
-saveRDS(cor_age_sex, "../saves/cor_age_sex.rds")
-
-cor_age_sex <- readRDS("../saves/cor_age_sex.rds")
-
-ggplot(cor_age, aes(x = size, y = cor,col = age_group))+
-  geom_point()+
-  geom_line(aes(group = age_group))+
-  ylim(0.5,1)+
-  theme_bw()
-```
 
 
 ## Extract selected items

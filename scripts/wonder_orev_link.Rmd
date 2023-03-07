@@ -13,6 +13,7 @@ library(ggthemes)
 library(geomtextpath)
 ```
 
+# new Data
 
 ```{r}
 
@@ -25,7 +26,10 @@ link_data <- wonder_data%>%
   left_join(orev_data%>%
               group_by(subjID)%>%
               summarise(orev = mean(correct)))%>%
-  mutate(age_group = substr(age, 1,1))
+  filter(!is.na(orev))%>%
+  mutate(age_group = substr(age, 1,1))%>%
+  ungroup()%>%
+  distinct(subjID, .keep_all = T)
 
 link_data_select <- wonder_data%>%
   filter(english %in% orev_data$targetWord)%>%
@@ -34,7 +38,10 @@ link_data_select <- wonder_data%>%
   left_join(orev_data%>%
               group_by(subjID)%>%
               summarise(orev = sum(correct)))%>%
-  mutate(age_group = substr(age, 1,1))
+  mutate(age_group = substr(age, 1,1))%>%
+  filter(!is.na(orev))%>%
+  ungroup()%>%
+  distinct(subjID, .keep_all = T)
 
 ```
 
@@ -46,6 +53,9 @@ ggplot(link_data, aes(x = wonder, y = orev))+
   #facet_grid(~age_group)+
   lims(x = c(0,1), y = c(0,1))+
   theme_bw()
+```
+```{r}
+ppcor::pcor.test(link_data$wonder, link_data$orev, link_data$age)
 ```
 
 
@@ -59,7 +69,23 @@ ggplot(link_data_select, aes(x = wonder, y = orev))+
   theme_bw()
 ```
 
-# new Data
+```{r}
+m_won_orev <- wonder_data%>%
+  group_by(subjID)%>%
+  group_by(age, subjID)%>%
+  summarise(sum  = sum(score),
+            n = n())%>%
+  left_join(orev_data%>%
+              group_by(subjID)%>%
+              summarise(orev = sum(correct)))%>%
+  filter(!is.na(orev))%>%
+  ungroup()%>%
+  mutate(age = scale(age),
+         orev = scale(orev))
+  
+
+m1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = m_won_orev, chains = 4, cores = 4)
+```
 
 
 # old Data
@@ -70,12 +96,7 @@ orev_d <- read_csv("../../vocab/data/clean_data.csv")%>%
   group_by(subjID)%>%
   summarise(orev = mean(correct))
 
-wonder_d <- data%>%
-  group_by(subjID)%>%
-  mutate(n = n())%>%
-  filter(n == 379)%>%
-  dplyr::select(-n)%>%
-  #filter(english %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+wonder_d <- wonder_data%>%
   group_by(age, subjID)%>%
   summarise(wonder = mean(score))
 
@@ -89,8 +110,6 @@ wonder_d%>%
   lims(x = c(0,1), y = c(0,1))+
   theme_bw()
 
-library(ppcor)
-
 orev_wonder <- wonder_d%>%
   left_join(orev_d)%>%
   filter(!is.na(orev))%>%
@@ -98,15 +117,7 @@ orev_wonder <- wonder_d%>%
 
 ppcor::pcor.test(orev_wonder$wonder, orev_wonder$orev, orev_wonder$age)
 
-
-library(brms)
-
-m_wonder <- data%>%
-  group_by(subjID)%>%
-  mutate(n = n())%>%
-  filter(n == 379)%>%
-  dplyr::select(-n)%>%
-  #filter(english %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+om_won_orev <- wonder_data%>%
   group_by(age, subjID)%>%
   summarise(sum  = sum(score),
             n = n())%>%
@@ -117,65 +128,5 @@ m_wonder <- data%>%
          orev = scale(orev))
   
 
-m1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = m_wonder, chains = 4, cores = 4)
-```
-
-```{r}
-
-cor_sim <- tibble()
-
-for (i in 1:10000) {
-  
-  sub_words <- sample(data$word, 200)
-
-wd <- data%>%
-  filter(subjID %in% orev_d$subjID)%>%
-  group_by(subjID)%>%
-  mutate(n = n())%>%
-  filter(n == 379)%>%
-  dplyr::select(-n)%>%
-  filter(word %in% sub_words)%>%
-  group_by(subjID)%>%
-  summarise(wonder = mean(score))%>%
-  arrange(subjID)
-  
-od <- orev_d%>%
-  filter(subjID %in% wd$subjID)%>%
-  arrange(subjID)%>%pull(orev)
-  
-cor <-  cor(wd%>%pull(wonder), od)
-
-word_list = list(sub_words)
-
-row <- tibble(words = word_list, iter = i, cor = cor)
-
-cor_sim <- bind_rows(cor_sim, row)
-  
-}
-
-cor_sim%>%
-  ggplot(aes(x = cor))+
-  geom_histogram(fill = "white", col= "black")+
-  theme_bw()
-
-hcw <- cor_sim%>%
-  unnest(cols = words)%>%
-  group_by(words)%>%
-  summarise(mean_cor = cor)%>%
-  arrange(-mean_cor)%>%
-  head(200)%>%
-  pull(words)
-
-data%>%
-  group_by(subjID)%>%
-  mutate(n = n())%>%
-  filter(n == 379)%>%
-  dplyr::select(-n)%>%
-  filter(word %in% hcw)%>%
-  group_by(subjID)%>%
-  summarise(wonder = mean(score))%>%
-  left_join(orev_d)%>%
-  filter(!is.na(orev))%>%
-  summarise(cor = cor(wonder, orev))
-
+om1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = om_won_orev, chains = 4, cores = 4)
 ```
