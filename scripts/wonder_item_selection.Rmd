@@ -5,7 +5,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 library(tidyverse)
-library(ggpubr)
+#library(ggpubr)
 library(ggthemes)
 library(tidybayes)
 library(brms)
@@ -13,7 +13,7 @@ library(rstan)
 library(loo)
 library(coda)
 library(testing)
-library(geomtextpath)
+#library(geomtextpath)
 library(ggridges)
 
 estimate_mode <- function(s) {
@@ -64,32 +64,38 @@ prior_1pl <-
 ### Model
 
 ```{r}
-irt1 <- brm(
-  data = irt_dat,
-  family = bernoulli(),
-  score ~ 1 + (1 | word) + (1 | subjID),
-  prior = prior_1pl,
-  #control = list(adapt_delta = 0.9, max_treedepth = 12),
-  cores = 6,
-  chains = 6,
-  iter = 6000,
-  threads = threading(8), #to speed things up, comment out if not on a cluster
-  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)
-
-irt1 <- add_criterion(irt1,criterion = c("loo", "waic")) 
-
-saveRDS(irt1, "../saves/irt1.rds")
+# irt1 <- brm(
+#   data = irt_dat,
+#   family = bernoulli(),
+#   score ~ 1 + (1 | word) + (1 | subjID),
+#   prior = prior_1pl,
+#   control = list(adapt_delta = 0.95, max_treedepth = 20),
+#   cores = 6,
+#   chains = 6,
+#   iter = 6000,
+#   threads = threading(8), #to speed things up, comment out if not on a cluster
+#   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+# )
+# 
+# saveRDS(irt1, "../saves/irt1.rds")
+# 
+# irt1 <- add_criterion(
+#   irt1,
+#   criterion = c("loo","waic"),
+#   cores = 1,
+#   ndraws = 2000
+# )
+# 
+# saveRDS(irt1, "../saves/irt1.rds")
 
 irt1 <- readRDS("../saves/irt1.rds")
-
 ```
 
 ### Extract fit indices
 
 ```{r}
 rasch_fit_draws <- irt_dat%>%
-  add_epred_draws(irt1, re_formula = ~(1 | word) + (1 | subjID), ndraws = 500)
+  add_epred_draws(irt1, re_formula = ~(1 | word) + (1 | subjID), ndraws = 1000)
   
 rasch_fit <- rasch_fit_draws%>%
   mutate(zvi = (score - .epred)/(.epred*(1-.epred))^0.5)%>%
@@ -124,19 +130,25 @@ rasch_fit_mode%>%
   scale_color_colorblind(name = "Fit index")+
     labs(x = "Index value", y = "Target word (sorted by rated age of acquisition)")+
   facet_wrap(~group, scales = "free_y", nrow = 2)+
-  scale_x_continuous(breaks = c(0,0.5, 07, 1, 1.3, 1.5), labels = c(0,0.5, 07, 1, 1.3, 1.5), limits = c(0,10))+
+  scale_x_continuous(breaks = c(0,0.5, 07, 1, 1.3, 1.5), labels = c(0,0.5, 07, 1, 1.3, 1.5), limits = c(0,4))+
   theme_bw()+
   theme(legend.position = c(0.95,0.8))
 ```
-
 ```{r}
-ggsave("../graphs/in_outfit_all.png", height = 8, width = 16, scale = 1.5)
+# remove items that have very poor in and outfit 
+
+fit_selected_items <- rasch_fit_mode%>%ungroup()%>%filter(0.5 < mode & 1.5 > mode)%>%group_by(word)%>%mutate(n = n())%>%filter(n == 2)%>%distinct(word)%>%pull(word)
+
+saveRDS(fit_selected_items, "../saves/fit_selected_items.rds")
+
+fit_selected_items <- readRDS( "../saves/fit_selected_items.rds")
+
 ```
 
 
 ```{r}
 rasch_fit_mode%>%
-  filter(0.7 < mode & 1.3 > mode)%>%
+  filter(word %in% fit_selected_items)%>%
   group_by(word)%>%
   mutate(n = n())%>%
   filter(n == 2)%>%
@@ -160,54 +172,178 @@ rasch_fit_mode%>%
 ggsave("../graphs/in_outfit_select.png", height = 8, width = 16, scale = 1.5)
 ```
 
+## 1PL model for selected items
 
-## 2PL Model
+Run script `run1PLmodel_sel_fit.R`
 
 ```{r}
-prior_va_2pl <- 
-  prior("normal(0, 2)", class = "b", nlpar = "eta") +
-  prior("normal(0, 1)", class = "b", nlpar = "logalpha") +
-  prior("normal(0, 1)", class = "sd", group = "subjID", nlpar = "eta") + 
-  prior("normal(0, 3)", class = "sd", group = "word", nlpar = "eta") +
-  prior("normal(0, 1)", class = "sd", group = "word", nlpar = "logalpha")
+irt1_fit_sel <- readRDS("../saves/irt1_fit_sel.rds")
 ```
 
 ```{r}
-irt2PL <- brm(
-  data = irt_dat,
-  family = brmsfamily("bernoulli", "identity"),
-  bf(
-    score ~ inv_logit(exp(logalpha) * eta),
-    eta ~ 1 + (1 |i| word) + (1 | subjID),
-    logalpha ~ 1 + (1 |i| word),
-    nl = TRUE
-  ),
-  prior = prior_va_2pl,
-  #control = list(adapt_delta = 0.9, max_treedepth = 12),
-  cores = 6,
-  chains = 6,
-  iter = 6000,
-  #warmup = 2000,
-  #threads = threading(8), #to speed things up, comment out if not on a cluster
-  #backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)
+rasch_fit_draws_fit_sel <- irt_dat%>%
+  filter(word %in% fit_selected_items)%>%
+  add_epred_draws(irt1_fit_sel, re_formula = ~(1 | word) + (1 | subjID), ndraws = 1000)
 
-irt2PL <- add_criterion(irt2PL,criterion = c("loo", "waic")) 
+rasch_fit_fit_sel <- rasch_fit_draws_fit_sel%>%
+  mutate(zvi = (score - .epred)/(.epred*(1-.epred))^0.5)%>%
+  group_by(word,aoa_rating_german, .draw)%>%
+  summarise(outfit = sum(zvi^2)/length(unique(subjID)),
+            infit = (sum(zvi^2*(.epred*(1-.epred)))/sum(.epred*(1-.epred))))
 
-saveRDS(irt2PL, "../saves/irt2PL.rds")
+rasch_fit_mode_fit_sel <- rasch_fit_fit_sel%>%
+  pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
+  group_by(word, aoa_rating_german, fit_index)%>%
+  summarise(mode = estimate_mode(value),
+            lci = hdi_lower(value),
+            uci = hdi_upper(value))
 
-irt2PL <- readRDS("../saves/irt2PL.rds")
+saveRDS(rasch_fit_mode_fit_sel, "../saves/rasch_fit_mode_fit_sel.rds")
+
+rasch_fit_mode_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds")
 ```
+
+
+```{r}
+rasch_fit_mode_fit_sel%>%
+  select(word, fit_index, mode)%>%
+  rename(sel_fit_mode = mode)%>%
+  left_join(rasch_fit_mode)%>%
+  group_by(fit_index)%>%
+  summarise(cor = cor(sel_fit_mode, mode))
+```
+
+### ICC
+
+```{r}
+icc1PL <- posterior_samples(irt1_fit_sel)%>% 
+  select(b_Intercept, starts_with("r_word"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_word"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
+  expand(nesting(iter, b_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  mutate(p = inv_logit_scaled(b_Intercept + xi + theta)) %>% 
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(aoa%>%rename(item = word))
+```
+
+```{r}
+icc1PL %>% 
+  ggplot(aes(x = theta, y = p,group = item, col = aoa_rating_german)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  scale_color_viridis_c(name = "AoA") +
+  labs(title = "ICCs for the 1PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  theme_minimal()
+```
+
+
+## 2PL Model for selected items
+
+Run script `run2PLmodel_sel_fit.R`
+
+```{r}
+irt2PL_fit_sel <- readRDS("../saves/irt2PL_fit_sel.rds")
+```
+### Easiness and discrimination
+
+```{r}
+coef_2PL <- coef(irt2PL_fit_sel)
+
+eta <- coef_2PL$word[, , "eta_Intercept"] %>%
+	as_tibble(rownames = "item")
+
+alpha <- coef_2PL$word[, , "logalpha_Intercept"] %>%
+	exp() %>%
+	as_tibble(rownames = "item")
+
+params <- bind_rows(eta, alpha, .id = "nlpar") %>%
+	select(-Est.Error) %>%
+	mutate(nlpar = factor(nlpar, labels = c("Easiness", "Discrimination")))%>%
+  left_join(aoa%>%rename(item = word))
+
+ggplot(params,aes(reorder(item, -aoa_rating_german), Estimate, ymin = Q2.5, ymax = Q97.5)) +
+	facet_wrap("nlpar", scales = "free_x") +
+	geom_pointrange() +
+	coord_flip() +
+	labs(x = "Item")+
+  theme_minimal()
+```
+
+
+### ICC
+
+```{r}
+icc2PL <- posterior_samples(irt2PL_fit_sel)%>% 
+  select(b_eta_Intercept, b_logalpha_Intercept, starts_with("r_word"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_word")) %>%
+  mutate(item      = str_extract(name, pattern = "(?<=\\[).*(?=,Intercept\\])"),
+         parameter = ifelse(str_detect(name, "eta"), "xi", "logalpha"))%>%
+  select(-name) %>% 
+  pivot_wider(names_from = parameter, values_from = value)%>% 
+  expand(nesting(iter, b_eta_Intercept, b_logalpha_Intercept, item, xi, logalpha),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  # note the difference in the equation
+  mutate(p = inv_logit_scaled(exp(b_logalpha_Intercept + logalpha) * (b_eta_Intercept + theta + xi))) %>% 
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(aoa%>%rename(item = word))
+
+```
+
+```{r}
+icc2PL %>% 
+  ggplot(aes(x = theta, y = p,group = item, col = aoa_rating_german)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  scale_color_viridis_c(name = "AoA") +
+  labs(title = "ICCs for the 2PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  theme_minimal()
+```
+
+## Compare ICCs
+
+```{r}
+bind_rows(
+icc1PL%>%mutate(model = "1PL"),
+icc2PL%>%mutate(model = "2PL"),
+)%>% 
+  ggplot(aes(x = theta, y = p,group = model, col = model)) +
+  geom_line() +
+  facet_wrap(~item)+
+  #guides(col = F)+
+  scale_color_colorblind(name = "Model") +
+  labs(x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  theme_void()
+```
+
+
+
+## Compare models
+
+```{r}
+loo_compare(irt1_fit_sel, irt2PL_fit_sel)%>%as_tibble(rownames = "model")
+```
+
 
 # Indices
 
 ```{r}
-items <- unique(data$word)
-easiness_rasch <- ranef(irt1)$word%>%as_tibble(rownames = "item") %>%pull(Estimate.Intercept)
-infit <- rasch_fit_mode %>% filter(fit_index == "infit")%>%arrange(word)%>% pull(mode)
-outfit <- rasch_fit_mode %>% filter(fit_index == "outfit")%>%arrange(word)%>% pull(mode)
-#disc_2PL <- coef(irt2PL)$word[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
-
+items <-data%>%filter(word %in% fit_selected_items)%>%distinct(word)%>%pull(word)
+easiness_1PL_fit_sel <- ranef(irt1_fit_sel)$word%>%as_tibble(rownames = "item") %>%pull(Estimate.Intercept)
+infit_fit_sel <- rasch_fit_mode_fit_sel %>% filter(fit_index == "infit")%>%arrange(word)%>% pull(mode)
+outfit_fit_sel <- rasch_fit_mode_fit_sel %>% filter(fit_index == "outfit")%>%arrange(word)%>% pull(mode)
+disc_2PL_fit_sel <- coef(irt2PL_fit_sel)$word[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
 ```
 
 # Item selection
@@ -215,129 +351,7 @@ outfit <- rasch_fit_mode %>% filter(fit_index == "outfit")%>%arrange(word)%>% pu
 ## Simulated annealing algorithm
 
 ```{r}
-score_fn <- function(subset) {
-	easinesses <- sort(easiness_rasch[subset])
-	nn_dists <- rep(0, sum(subset)-1)
-	for(i in 1:sum(subset)-1) {
-		nn_dists[i] <- easinesses[i+1] - easinesses[i]
-	}
-	spacing <- -1*sd(nn_dists)/3
-	
-	# var_disc_sample <- disc_2PL[subset]
-	# var_disc_2PL <- -1*var(var_disc_sample)*10
-	
-	infit_sample <- infit[subset]
-	infit_dist <- unlist(lapply(infit_sample, func))
-  mean_infit <- -4*mean(infit_dist)
-  
-	outfit_sample <- outfit[subset]
-	outfit_dist <- unlist(lapply(outfit_sample, func))
-  mean_outfit <- -2*mean(outfit_dist)
-  
-  #mean_pkd <- mean(pkd[subset])/5
-
-
-	 
-	# sel <- items[subset == TRUE]
-	# 
-	# sub_dat <- data%>%
-	#   filter(targetWord %in% sel)%>%
-	#   group_by(subjID)%>%
-	#   summarise(mean_sub = mean(correct))
-	# 
-	# cor <- cor(sub_dat$mean_sub,full$mean_full)
-	# 
-	# return(spacing + mean_discrim/6 + cor/3)
-	#return(spacing + mean_infit + mean_outfit+ var_disc_2PL)
-  return(spacing + mean_infit + mean_outfit)
-}
-
-
-proposal_fn <- function(subset) {
-	# Randomly sample a number of swaps.
-	# Prefer a small number of swaps for "fine tuning", but allow
-	# occasional large numbers of swaps, including a complete
-	# exchange of the subset
-	subset_size = sum(as.integer(subset))
-	max_swaps = min(subset_size, length(subset) - subset_size)
-	swaps <- rbinom(1, max_swaps-1, 1/(max_swaps-1)) + 1
-
-	# Choose the items to swap
-	active_items <- seq(1:length(subset))[subset == TRUE]
-	inactive_items <- seq(1:length(subset))[subset == FALSE]
-	actives_to_swap <- sample(active_items, swaps)
-	inactives_to_swap <- sample(inactive_items, swaps)
-
-	# Do the swapping
-	for(i in 1:swaps) {
-		subset[actives_to_swap[i]] <- FALSE
-		subset[inactives_to_swap[i]] <- TRUE
-	}
-	return(subset)
-}
-
-simulated_annealing_rasch <- function(k, cooling_ratio=0.999, reset_thresh=1000, break_thresh=10000) {
-  
-  items <- unique(data$word)
-  easiness_rasch <- ranef(irt1)$word%>%as_tibble(rownames = "item") %>%pull(Estimate.Intercept)
-  infit <- rasch_fit_mode %>% filter(fit_index == "infit")%>%arrange(word)%>% pull(mode)
-  outfit <- rasch_fit_mode %>% filter(fit_index == "outfit")%>%arrange(word)%>% pull(mode)
-#disc_2PL <- coef(irt2PL)$word[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
-
-  N <- length(easiness_rasch)
-
-	current_subset <- sample(c(rep(TRUE, k), rep(FALSE, N-k)))
-	best_subset <- current_subset
-	best_score <- score_fn(best_subset)
-
-	temp <- 100
-	rejected <- 0
-	no_new_bests <- 0
-	for(i in 1:1e6) {
-		# Score new subset, and toss a coin
-		new_subset <- proposal_fn(current_subset)
-		new_score <- score_fn(new_subset)
-		accept_decrease <- rbernoulli(1, temp / 100)
-
-		# Accept the new subset if it's an improvement, or if our
-		# cooling coin came up heads.
-		if(new_score > best_score | accept_decrease) {
-			current_subset <- new_subset
-			rejected <- 0
-			if(new_score > best_score) {
-				best_subset <- new_subset
-				best_score <- new_score
-				no_new_bests <- 0
-			} else {
-				no_new_bests <- no_new_bests + 1
-			}
-		# Quit if we've had too many rejections in a row.
-		} else {
-			rejected <- rejected + 1
-			no_new_bests <- no_new_bests + 1
-			if(rejected == break_thresh) {
-				#print(best_score)
-			  ret <- tibble(best_subset = list(best_subset),
-	              best_score = best_score)
-			  
-				return(ret)
-			}
-		}
-		# Start random resets to the current best subset if we haven't
-		# found anything better in quite a while.
-		if(no_new_bests > reset_thresh & rbernoulli(1, 1/100)) {
-			current_subset <- best_subset
-		}
-
-		# Cool it!
-		temp <- temp*cooling_ratio
-	}
-	#print(best_score)
-	ret <- tibble(best_subset = list(best_subset),
-	              best_score = best_score)
-	
-	return(ret)
-}
+source("../scripts/helper/simulated_annealing.R")
 ```
 
 ### Test run
@@ -367,160 +381,94 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
 
 ```
 
-## Person parameters by size
+### Person parameters
 
 ```{r}
-irt1_50 <- brm(
-  data = irt_dat,
-  family = bernoulli(),
-  score ~ 1 + (1 | word) + (1 | subjID),
-  prior = prior_1pl,
-  #control = list(adapt_delta = 0.9, max_treedepth = 12),
-  cores = 6,
-  chains = 6,
-  iter = 6000,
-  threads = threading(8), #to speed things up, comment out if not on a cluster
-  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)
-```
+# full_model_ci_range <- ranef(irt1_fit_sel)$subjID%>%as_tibble(rownames = "subjID")%>%mutate(size = 270)
+# 
+# saveRDS(full_model_ci_range, "../saves/full_model_ci_range.rds")
 
+ci_ranges <- readRDS("../saves/determine_size.rds")%>%
+  mutate(type = "1PL params only")%>%
+  bind_rows(readRDS("../saves/determine_size_w2PL.rds"))%>%
+  bind_rows(readRDS("../saves/full_model_ci_range.rds")%>%mutate(iter = 1, type = "1PL params only"))%>%
+  bind_rows(readRDS("../saves/full_model_ci_range.rds")%>%mutate(iter = 1, type = "with 2PL disc params"))%>%
+  group_by(size,iter, type)%>%
+  mutate(ci_range = Q97.5.Intercept - Q2.5.Intercept)%>%
+  summarise(mean_ci_range = mean(ci_range))
+```
 
 ```{r}
-persparams <- ranef(irt1)$subjID%>%as_tibble(rownames = "subjID")%>%mutate(model = "full")
-
-ggplot(persparams, aes(x = Estimate.Intercept, y = reorder(subjID, Estimate.Intercept)))+
-  geom_pointrange(aes(xmin = Q2.5.Intercept, xmax = Q97.5.Intercept), alpha = 0.2)+
-  theme_minimal()+
-  theme(axis.text.y = element_blank())
-```
-
-
-## LOO debugging
-
-```{r}
-sim_rasch_test <- simulated_annealing_rasch(10)
-
-sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
-
-
-sel_items <- sample(unique(data$word), 10)
-
-sub_subj <- sample(unique(data$subjID), 10)
-
-
-small_data <- data%>%
-  filter(word %in% sel_items, 
-         subjID %in% sub_subj)
-
-irt1_small <- brm(
-  data = small_data,
-  family = bernoulli(),
-  score ~ 1 + (1 | word) + (1 | subjID),
-  prior = prior_1pl,
-  control = list(adapt_delta = 0.9, max_treedepth = 12),
-  cores = 4,
-  chains = 4,
-  iter = 4000,
-  threads = threading(8), #to speed things up, comment out if not on a cluster
-  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)
-
-irt1_small <- add_criterion(irt1_small,criterion = c("loo", "waic")) 
-
-irt2PL_small <- brm(
-  data = small_data,
-  family = brmsfamily("bernoulli", "identity"),
-  bf(
-    score ~ inv_logit(exp(logalpha) * eta),
-    eta ~ 1 + (1 |i| word) + (1 | subjID),
-    logalpha ~ 1 + (1 |i| word),
-    nl = TRUE
-  ),
-  prior = prior_va_2pl,
-  control = list(adapt_delta = 0.9, max_treedepth = 12),
-  cores = 4,
-  chains = 4,
-  iter = 4000,
- # threads = threading(8), #to speed things up, comment out if not on a cluster
-#  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)
-
-irt2PL_small <- add_criterion(irt2PL_small,criterion = c("loo", "waic")) 
-
-
-loo_compare(irt1_small, irt2PL_small)
-
-```
-
-
-
-## Check variation in score
-
-```{r, warning=FALSE}
-sim_score_rasch <- tibble()
-
-for (i in c(50,100,150,200,250)) {
-  
-  for (j in 1:2) {
-  
-   sim <- simulated_annealing_rasch(i)
-  
-   score <- tibble(score = sim$best_score, 
-                   size = i,
-                   iter = j)
-   
-   sim_score_rasch <- bind_rows(sim_score_rasch, score)
-  }
-  
-}
-
-#saveRDS(sim_score_rasch, "../saves/variation_in_score.rds")
-
-sim_score_rasch%>%
-  ggplot(aes(x = size, y = score, group = iter))+
-  geom_point(pch = 1)+
-  theme_minimal()
-```
-
-## Correlation by age and size
-
-```{r}
-cor_age <- tibble()
-
-#for (j in 1:5) {
-  
-for (i in c(50,75, 100,125,150,175,200,225,250)) {
-  
-   sim <- simulated_annealing_rasch(i)
-  
-    sel <- items[unlist(sim$best_subset) == TRUE]
-
-
-    cor <- data%>%
-      filter(word %in% sel)%>%
-      group_by(age_group,subjID)%>%
-  summarise(mean_sub = mean(score))%>%
-  right_join(full)%>%
-  group_by(age_group)%>%
-  summarise(cor = cor(mean_sub, mean_full))%>%
-  mutate(size = i, 
-         iter = j)
-  
-  cor_age <- bind_rows(cor_age, cor)
-}
-
-#}
-  
-saveRDS(cor_age_sex, "../saves/cor_age_sex.rds")
-
-cor_age_sex <- readRDS("../saves/cor_age_sex.rds")
-
-ggplot(cor_age, aes(x = size, y = cor,col = age_group))+
-  geom_point()+
-  geom_line(aes(group = age_group))+
-  ylim(0.5,1)+
+ggplot(ci_ranges, aes(x = size, y = mean_ci_range, col = factor(iter)))+
+  geom_point(aes(pch = type))+
+  geom_line(aes(lty = type))+
+  labs(x = "No of items", y = "Mean CrI range of person parameters")+
+  scale_color_colorblind(name = "Run")+
+  facet_grid(~type)+
+  #ylim(0.5,2)+
   theme_bw()
 ```
+
+
+```{r}
+readRDS("../saves/determine_size.rds")%>%
+  bind_rows(readRDS("../saves/full_model_ci_range.rds"))%>%
+  group_by(size)%>%
+  mutate(ci_range = Q97.5.Intercept - Q2.5.Intercept)%>%
+  ggplot( aes(x = size, y = ci_range))+
+  geom_point( alpha = .01)+
+  geom_line(aes(group = subjID), alpha = .01)+
+  labs(x = "No of items", y = "Mean CrI range of person parameters")+
+  #ylim(0.5,2)+
+  theme_bw()
+```
+
+### Items
+
+```{r}
+sel_items <- readRDS("../saves/determine_size.rds")%>%
+  filter(size == 150)%>%
+  distinct(iter,items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(150)%>%
+  select(items)%>%
+  rename(word = items)
+
+sel_items%>%
+  left_join(data%>% distinct(word, word_type))%>%
+  group_by(word_type)%>%
+  summarise(prop_type = n()/150)
+
+```
+
+```{r}
+param_cor <- readRDS("../saves/determine_size.rds")%>%
+  mutate(type = "1PL params only")%>%
+  bind_rows(readRDS("../saves/determine_size_w2PL.rds"))%>%
+  left_join(readRDS("../saves/full_model_ci_range.rds")%>%rename(full_est = Estimate.Intercept)%>%select(subjID, full_est), by = "subjID")%>%
+  group_by(size,iter, type)%>%
+  summarise(cor = cor(Estimate.Intercept, full_est))
+```
+
+```{r}
+ggplot(param_cor, aes(x = size, y = cor, col = factor(iter)))+
+  geom_point(aes(pch = type))+
+  geom_line(aes(lty = type))+
+  labs(x = "No of items", y = "Correlation with person parameters based on all items")+
+  ylim(0.9,1)+
+  scale_color_colorblind(name = "Run")+
+  theme_bw()
+```
+
+## Model comparison
+
+```{r}
+readRDS("../saves/model_comparison.rds")
+```
+
 
 ## Word type by size
 
@@ -555,107 +503,6 @@ ggplot(type_size, aes(x = size, y = prop_type, col = word_type))+
   theme_bw()
 ```
 
-
-
-## Determine size
-
-```{r}
-# #determine_size <- tibble()
-#   
-#   for(j in 5:5){
-#   
-#   for (i in c(36:40)) {
-#     
-#     sim <- simulated_annealing_rasch(i)
-#     
-#     sel <- items[unlist(sim$best_subset) == TRUE]
-#     
-#     sub_dat <- irt_dat%>%filter(targetWord %in% sel)
-#   
-#     m1PL <- update(irt1_guess, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo"))
-#   	m3PL <- update(irt2PL, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo")) 
-#   	
-#   	comp <- loo_compare(m1PL, m3PL)%>%as_tibble(rownames = "model")%>%filter(model == "m1PL")%>%mutate(ratio = abs(elpd_diff)/(2*se_diff))
-#   	
-#   	sub_dat_cor <- sub_dat%>%
-#   	  group_by(subjID)%>%
-#   	  summarise(mean_sub = mean(correct))
-#   
-#   	cor <- cor(sub_dat_cor$mean_sub,full$mean_full)
-#   	
-#   	row <- tibble(size = i, 
-#            iter = j,
-#            elpd_diff = as.numeric(comp%>%pull(elpd_diff)),
-#            se_diff = as.numeric(comp%>%pull(se_diff)),
-#            ratio = as.numeric(comp%>%pull(ratio)),
-#            correlation = cor)
-#     
-#     determine_size <- bind_rows(determine_size, row)
-#     
-#     saveRDS(determine_size, "../saves/determine_size.rds")
-#   }
-#   
-#   }
-#   
-# saveRDS(determine_size, "../saves/determine_size.rds")
-
-determine_size <- readRDS("../saves/determine_size.rds")
-
-determine_size%>%
-  mutate(ratio = ifelse(elpd_diff == 0,0,ratio))%>%
-  pivot_longer(cols = c(ratio, correlation), names_to = "type",values_to = "value")%>% 
-  ggplot(aes(x = factor(size), y = value))+
-  geom_point(pch = 1)+
-  #geom_line()+
-  facet_grid(type~. , scales = "free_y")+
-  theme_bw()+
-  labs(x = "No. of items", y = "Comparison value", title = "ratio = abs(elpd_diff)/(2*se_diff)")
-
-```
-
-```{r}
-ggsave("../graphs/item_sel.png", height = 6, width = 10, scale = 1)
-```
-
-## Correlation by age and size
-
-```{r}
-cor_age <- tibble()
-
-#for (j in 1:5) {
-  
-for (i in c(50,75, 100,125,150,175,200,225,250)) {
-  
-   sim <- simulated_annealing_rasch(i)
-  
-    sel <- items[unlist(sim$best_subset) == TRUE]
-
-
-    cor <- data%>%
-      filter(word %in% sel)%>%
-      group_by(age_group,subjID)%>%
-  summarise(mean_sub = mean(score))%>%
-  right_join(full)%>%
-  group_by(age_group)%>%
-  summarise(cor = cor(mean_sub, mean_full))%>%
-  mutate(size = i, 
-         iter = j)
-  
-  cor_age <- bind_rows(cor_age, cor)
-}
-
-#}
-  
-saveRDS(cor_age_sex, "../saves/cor_age_sex.rds")
-
-cor_age_sex <- readRDS("../saves/cor_age_sex.rds")
-
-ggplot(cor_age, aes(x = size, y = cor,col = age_group))+
-  geom_point()+
-  geom_line(aes(group = age_group))+
-  ylim(0.5,1)+
-  theme_bw()
-```
 
 
 ## Extract selected items
