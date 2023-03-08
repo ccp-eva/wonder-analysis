@@ -182,6 +182,13 @@ Run script `run1PLmodel_sel_fit.R`
 
 ```{r}
 irt1_fit_sel <- readRDS("../saves/irt1_fit_sel.rds")
+loo(irt1_fit_sel)
+
+irt1_fit_sel2 <- irt1_fit_sel%>%add_criterion(criterion = c("loo"), overwrite = T)
+
+irt1_fit_sel$criteria$loo = NULL
+
+loo(irt1_fit_sel2)
 ```
 
 ```{r}
@@ -544,9 +551,10 @@ rasch_selected_items <- selected_items%>%
   arrange(-n)%>%
   ungroup()%>%
   head(175)%>%
-  select(-n)
+  select(-n)%>%
+  pull(word)
 
-write_csv(rasch_selected_items,"../data/selected_items.csv")
+#write_csv(rasch_selected_items,"../data/selected_items.csv")
 
 saveRDS(rasch_selected_items, "../saves/selected_items_rasch.rds")
 
@@ -566,17 +574,13 @@ irt_dat_sel <- irt_dat%>%
 ```{r}
 irt1_guess_sel <- brm(
   data = irt_dat_sel,
-  family = brmsfamily("bernoulli", "identity"),
-  bf(
-    correct ~ 0.25 + 0.75 * inv_logit(eta),
-    eta ~ 1 + (1 | targetWord) + (1 | subjID),
-    nl = TRUE
-  ),
-  prior = prior_1pl_guess,
-  control = list(adapt_delta = 0.95, max_treedepth = 12),
+  family = bernoulli(),
+  score ~ 1 + (1| word) + (1 | subjID),
+  prior = prior_1pl,
+  control = list(adapt_delta = 0.95, max_treedepth = 20),
   cores = 6,
   chains = 6,
-  iter = 6000,
+  iter = 8000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
 )%>%add_criterion(c("loo","waic")) 
@@ -627,7 +631,7 @@ ggsave("../graphs/ICC_1PL_sel.png", height = 6, width = 10, scale = 1, bg = "whi
 
 ```{r}
 irt1_dif_sex_sel <-  brm(
-  data = irt_dat,
+  data = irt_dat_sel,
   family = bernoulli(),
   score ~ 1 + (0+ sex | word) + (1 | subjID),
   prior = prior_1pl,
@@ -637,7 +641,7 @@ irt1_dif_sex_sel <-  brm(
   iter = 8000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)%>%add_criterion(c("loo","waic"))  
+)
 
 
 saveRDS(irt1_dif_sex_sel, "../saves/irt1_dif_sex_sel.rds")
@@ -657,7 +661,7 @@ loo_compare(irt1_guess_sel, irt1_guess_dif_order_sel, irt1_guess_dif_sex_sel)%>%
 
 ```{r}
 dif_sex <- as_draws_df(irt1_dif_sex_sel)%>%
-  select(b_eta_Intercept, starts_with("r_word"))%>%
+  select(b_Intercept, starts_with("r_word"))%>%
   mutate(iter = 1:n()) %>%
   pivot_longer(starts_with("r_word")) %>%
   mutate(name = str_remove(name, pattern = "r_word"),
@@ -686,18 +690,18 @@ ggplot(dif_sex,aes(x = reorder(item, aoa_rating_german))) +
 ```
 
 ```{r}
-ggsave("../graphs/dif_ci.png", height = 10, width = 10, scale = 1)
+ggsave("../graphs/dif_ci.png", height = 20, width = 10, scale = 1)
 ```
 
 ```{r}
-dif_sex_guess%>%
+dif_sex%>%
   pivot_wider(names_from = sex, values_from = c(mode,uci,lci))%>%
   ggplot(., aes(x = mode_f, y = mode_m))+
   geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .75)+
-  geom_point(pch = 1, size = 2, stroke  = 1, aes(col = factor(aoa_german_comb)))+
+  geom_point(pch = 1, size = 2, stroke  = 1, aes(col = factor(aoa_rating_german)))+
   geom_linerange(aes(ymin = lci_m, ymax = uci_m),  alpha = .25, lty = 1)+
   geom_linerange(aes(xmin = lci_f, xmax = uci_f),  alpha = .25, lty = 1)+
-  geom_text(aes(label = item, x = uci_f +0.2))+
+  #geom_text(aes(label = item, x = uci_f +0.2))+
   labs(x = "Group: female", y = "Group: male")+
   scale_color_viridis_d()+
   guides(col = F)+
