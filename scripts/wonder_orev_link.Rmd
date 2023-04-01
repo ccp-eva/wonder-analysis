@@ -32,13 +32,13 @@ link_data <- wonder_data%>%
   distinct(subjID, .keep_all = T)
 
 sel_items <- readRDS("../saves/determine_size.rds")%>%
-  filter(size == 150)%>%
+  filter(size == 75)%>%
   distinct(iter,items)%>%
   unnest()%>%
   group_by(items)%>%
   summarise(n = n())%>%
   arrange(-n)%>%
-  head(150)%>%
+  head(75)%>%
   pull(items)
 
 link_data_select <- wonder_data%>%
@@ -57,11 +57,21 @@ link_data_select <- wonder_data%>%
 ```
 
 ```{r}
-ggplot(link_data, aes(x = wonder, y = orev))+
+wonder_data%>%
+  summarise(n = n_distinct(subjID))
+
+orev_data%>%
+  summarise(n = n_distinct(subjID))
+```
+
+
+```{r}
+ggplot(link_data, aes(x = wonder, y = orev, col = age_group))+
   geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
-  geom_point(pch = 1, alpha = .5)+
-  stat_cor()+
-  #facet_grid(~age_group)+
+  geom_point(pch = 19,stroke = F,  alpha = .5, size = 2)+
+  stat_cor(inherit.aes = F, aes(x = wonder, y = orev))+
+  #geom_smooth(method = "lm")+
+  #facet_wrap(~age_group)+
   lims(x = c(0,1), y = c(0,1))+
   theme_bw()
 ```
@@ -71,11 +81,12 @@ ppcor::pcor.test(link_data$wonder, link_data$orev, link_data$age)
 
 
 ```{r}
-ggplot(link_data_select, aes(x = wonder, y = orev))+
+ggplot(link_data_select, aes(x = wonder, y = orev, col = age_group))+
   geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
-  geom_point(pch = 1, alpha = .5)+
-  stat_cor()+
-  #facet_grid(~age_group)+
+  geom_point(pch = 19,stroke = F,  alpha = .5, size = 2)+
+  stat_cor(inherit.aes = F, aes(x = wonder, y = orev))+
+  #geom_smooth(method = "lm", inherit.aes = F, aes(x = wonder, y = orev))+
+  facet_wrap(~age_group)+
   lims(x = c(0,1), y = c(0,1))+
   theme_bw()
 ```
@@ -101,6 +112,8 @@ m_won_orev <- wonder_data%>%
   
 
 m1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = m_won_orev, chains = 4, cores = 4)
+
+m1
 ```
 
 
@@ -152,6 +165,38 @@ om1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = om_won_orev, c
 ```
 
 
+```{r}
+orev_stab <- orev_data%>%group_by(subjID)%>%
+  summarise(orev2 = mean(correct))%>%
+  left_join(orev_d)%>%
+  na.omit(orev)%>%
+  left_join(wonder_data%>% mutate(age_group = substr(age, 1,1))%>%distinct(subjID, .keep_all = T)%>%select(subjID, age, age_group), by = "subjID")
+
+ppcor::pcor.test(orev_stab$orev2, orev_stab$orev, orev_stab$age)
+
+orev_stab%>%
+  summarise(mean_t1 = mean(orev), 
+            mean_t2 = mean(orev2))
+
+orev_stab%>%
+  ggplot(aes(x = orev2, y = orev))+
+  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
+  geom_jitter(pch = 19, alpha = .5, fill = "grey", height = 0.01, width = 0.01)+
+  #facet_grid(~age_group)+
+  stat_cor()+
+  lims(x = c(0,1), y = c(0,1))+
+  theme_bw()
+
+orev_stab%>%
+  mutate(col = ifelse(orev2 < orev, "de","in"))%>%
+  pivot_longer(cols = c(orev, orev2), names_to = "measure", values_to = "orev_score")%>%
+  ggplot(aes(x = measure, y = orev_score))+
+  geom_point(pch = 1)+
+  geom_line(aes(group = subjID, col = col),  alpha = .5)+
+  scale_color_manual(values = c("firebrick", "grey"), guide = F)+
+  theme_bw()
+```
+
 
 ```{r}
 library(tidybayes)
@@ -181,4 +226,42 @@ om1 %>%
   scale_fill_colorblind(name = "Predictor")+
   theme_bw()
 ```
+
+
+```{r}
+library(blavaan)
+
+m_data <- orev_data%>%
+  filter(targetWord %in% readRDS("../../vocab/saves/selected_items_rasch.rds"))%>%
+  group_by(subjID)%>%
+  mutate(orev_half = ifelse(trial %%2 == 0, "orev_even", "orev_odd"))%>%
+  group_by(subjID, orev_half)%>%
+  summarise(orev = mean(correct))%>%
+  pivot_wider(names_from = "orev_half", values_from = "orev")%>%
+  left_join(wonder_data%>%
+  group_by(subjID)%>%
+  mutate(wonder_half = ifelse(trial %%2 == 0, "wonder_even", "wonder_odd"))%>%
+  group_by(subjID, wonder_half)%>%
+  summarise(wonder = mean(score))%>%
+  pivot_wider(names_from = "wonder_half", values_from = "wonder"))%>%
+  na.omit()%>%
+  ungroup()%>%
+  mutate_if(is.numeric, scale)
+
+
+model <- 'wonder  =~ wonder_odd + wonder_even
+          orev  =~ orev_even + orev_odd
+          lang  =~ wonder + orev'
+
+fit <- bsem(model, data = m_data, bcontrol = list(cores = 3), target = "stan", n.chains = 3, burnin = 2000, sample = 2000, save.lvs = T)
+
+
+summary(fit, standardized = T,rsquare = T)
+
+blavInspect(fit, what = "lvmeans")%>%as_tibble()%>%bind_cols(m_data)
+
+
+```
+
+
 

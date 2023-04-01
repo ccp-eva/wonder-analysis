@@ -481,6 +481,48 @@ ggplot(param_cor, aes(x = size, y = cor, col = factor(iter)))+
   theme_bw()
 ```
 
+```{r}
+sel_it_comp_tobi_50 <- readRDS("../saves/determine_size.rds")%>%
+  filter(size == 50)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(50)%>%
+  pull(items)
+
+itme_list_50 <- read_csv("../data/wonder_irt_data.csv")%>%
+  distinct(word)%>%
+  mutate(no = row_number())%>%
+  filter(word %in% sel_it_comp_tobi_50)
+
+tobi_items_50 <- c(1, 6, 9, 18, 21, 22, 23, 52, 64, 65, 66, 71, 77, 78, 87, 92, 98, 99, 100, 103, 114, 118, 119, 123, 131, 134, 150, 152, 153, 166, 170, 174, 176, 186, 188, 189, 195, 198, 199, 205, 208, 210, 217, 218, 235, 248, 249, 251, 253, 264)
+
+sum(itme_list_50$no %in% tobi_items_50)
+```
+
+```{r}
+sel_it_comp_tobi_75 <- readRDS("../saves/determine_size.rds")%>%
+  filter(size == 75)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(75)%>%
+  pull(items)
+
+itme_list_75 <- read_csv("../data/wonder_irt_data.csv")%>%
+  distinct(word)%>%
+  mutate(no = row_number())%>%
+  filter(word %in% sel_it_comp_tobi_75)
+
+tobi_items_75 <- c(4, 6, 7, 9, 11, 21, 22, 23, 34, 38, 45, 47, 51, 52, 59, 62, 65, 66, 70, 71, 77, 78, 84, 87, 91, 92, 98, 99, 100, 103, 114, 117, 118, 119, 120, 121, 128, 131, 137, 145, 148, 150, 151, 153, 157, 160, 163, 166, 168, 170, 171, 172, 176, 182, 183, 184, 188, 189, 195, 196, 198, 199, 201, 202, 205, 208, 218, 223, 236, 238, 244, 248, 251, 261, 265)
+
+sum(itme_list_75$no %in% tobi_items_75)
+```
+
 ## Model comparison
 
 ```{r}
@@ -686,11 +728,11 @@ ggplot(dif_sex,aes(x = reorder(item, aoa_rating_german))) +
 	coord_flip() +
   scale_color_colorblind(labels = c("male","female"), name = "Group")+
 	labs(x = "Item", y = "Easiness estimate")+
-  theme_few()
+  theme_minimal()
 ```
 
 ```{r}
-ggsave("../graphs/dif_ci.png", height = 20, width = 10, scale = 1)
+ggsave("../graphs/dif_ci.png", height = 20, width = 10, scale = 1, bg = "white")
 ```
 
 ```{r}

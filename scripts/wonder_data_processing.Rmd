@@ -121,6 +121,20 @@ read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjähri
   select(`ID Nr.`	,Nachname,	Vorname,	Geschlecht,	Geburtsdatum,	Code	,Email	, Email_1,	Email_2)%>%
   write_xlsx(., "../data/wonder_raw_data/wonder_orev.xlsx")
 
+# reminder
+
+complete <- read_csv("../data/orev_data.csv")%>%distinct(subjID)%>%pull(subjID)
+
+bind_rows(
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =7),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =8)
+)%>%
+  filter(!Code %in% complete)%>%
+  distinct(`ID Nr.`, .keep_all = T)%>%
+  select(`ID Nr.`	,Nachname,	Vorname,	Geschlecht,	Geburtsdatum,	Code	,Email	, Email_1,	Email_2)%>%
+  write_xlsx(., "../data/wonder_raw_data/wonder_orev_reminder.xlsx")
+
+
 ```
 
 

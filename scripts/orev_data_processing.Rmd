@@ -68,3 +68,8 @@ filtered_data%>%left_join(
 
 ```
 
+```{r}
+filtered_data%>%
+  filter(subjID == "1scatykX")
+```
+
