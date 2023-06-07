@@ -166,39 +166,6 @@ om1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = om_won_orev, c
 
 
 ```{r}
-orev_stab <- orev_data%>%group_by(subjID)%>%
-  summarise(orev2 = mean(correct))%>%
-  left_join(orev_d)%>%
-  na.omit(orev)%>%
-  left_join(wonder_data%>% mutate(age_group = substr(age, 1,1))%>%distinct(subjID, .keep_all = T)%>%select(subjID, age, age_group), by = "subjID")
-
-ppcor::pcor.test(orev_stab$orev2, orev_stab$orev, orev_stab$age)
-
-orev_stab%>%
-  summarise(mean_t1 = mean(orev), 
-            mean_t2 = mean(orev2))
-
-orev_stab%>%
-  ggplot(aes(x = orev2, y = orev))+
-  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .5)+
-  geom_jitter(pch = 19, alpha = .5, fill = "grey", height = 0.01, width = 0.01)+
-  #facet_grid(~age_group)+
-  stat_cor()+
-  lims(x = c(0,1), y = c(0,1))+
-  theme_bw()
-
-orev_stab%>%
-  mutate(col = ifelse(orev2 < orev, "de","in"))%>%
-  pivot_longer(cols = c(orev, orev2), names_to = "measure", values_to = "orev_score")%>%
-  ggplot(aes(x = measure, y = orev_score))+
-  geom_point(pch = 1)+
-  geom_line(aes(group = subjID, col = col),  alpha = .5)+
-  scale_color_manual(values = c("firebrick", "grey"), guide = F)+
-  theme_bw()
-```
-
-
-```{r}
 library(tidybayes)
 
 bind_rows(
