@@ -413,6 +413,10 @@ freqAll <- sem(modelAll, irt_all, ordered =TRUE, parameterization = "theta")
 
 saveRDS(freqAll, "../saves/freqAll.rds")
 
+freqAll <- readRDS("../saves/freqAll.rds")
+
+lavaan::summary(freqAll, standardized = TRUE)
+
 miAll <- modindices(freqAll)
 saveRDS(miAll, "../saves/miAll.rds")
 

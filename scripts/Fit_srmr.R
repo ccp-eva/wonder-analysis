@@ -1,16 +1,21 @@
 library(lavaan)
 
-freq75 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq75.rds")
-freq100 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq100.rds")
-freq125 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq125.rds")
-freq150 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq150.rds")
-freq175 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq175.rds")
-freq200 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq200.rds")
+# freq75 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq75.rds")
+freq75 <- readRDS("../saves/freq75.rds")
+# freq100 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq100.rds")
+# freq125 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq125.rds")
+freq125 <- readRDS("../saves/freq125.rds")
+# freq150 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq150.rds")
+freq150 <- readRDS("../saves/freq150.rds")
+# freq175 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq175.rds")
+freq175 <- readRDS("../saves/freq175.rds")
+# freq200 <- readRDS("/Users/tobiaskoch/Dropbox/Projekte/Aktuelle Projekte/Manuel_Bohn/freq200.rds")
+freq200 <- readRDS("../saves/freq200.rds")
 
 
 
 summary(freq75, fit.measures=T)
-modindices(freq75, minimum.value = 100)
+modindices(freq75)
 
 # lhs op        rhs      mi    epc sepc.lv sepc.all sepc.nox
 # 1            f =~     Abitur 117.753 -0.266  -0.271   -0.190   -0.190
@@ -117,15 +122,18 @@ modindices(freq100, minimum.value = 100)
 
 
 summary(freq125, fit.measures=T)
-modindices(freq125, minimum.value = 100)
+mi125 <- modindices(freq125, minimum.value = 100)
+saveRDS(mi125, "../saves/mi125.rds")
 
 
-summary(freq150, fit.measures=T)
-modindices(freq150, minimum.value = 100)
+#summary(freq150, fit.measures=T)
+mi150 <- modindices(freq150, minimum.value = 100)
+saveRDS(mi150, "../saves/mi150.rds")
 
-summary(freq175, fit.measures=T)
-modindices(freq175, minimum.value = 100)
+#summary(freq175, fit.measures=T)
+mi175 <- modindices(freq175, minimum.value = 100)
+saveRDS(mi175, "../saves/mi175.rds")
 
-
-summary(freq200, fit.measures=T)
-modindices(freq200, minimum.value = 100)
+#summary(freq200, fit.measures=T)
+mi200 <- modindices(freq200, minimum.value = 100)
+saveRDS(mi200, "../saves/mi200.rds")

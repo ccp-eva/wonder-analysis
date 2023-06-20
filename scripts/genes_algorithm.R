@@ -3,8 +3,8 @@ library(lavaan)
 library(reshape2)
 library(parallel)
 
-setwd("~/Dropbox/Projekte/Research/Manuel_Bohn")
-df<-read.csv("wonder_irt_data.csv")
+#setwd("~/Dropbox/Projekte/Research/Manuel_Bohn")
+df<-read.csv("../data/wonder_irt_data.csv")
 names(df)
 # long to wide
 df_wide<-dcast(df, subjID +sex ~ word, value.var = "score")
@@ -16,14 +16,23 @@ load("short_scale.RData")
 fs<-list(f=names(df_wide)[c(3:272)])
 tmp <- df_wide[, 3:272] |> lapply(as.ordered) |> as.data.frame()
 
-irt_25 <- gene(tmp, fs, 25, item.invariance = 'ess.equivalent', cores=10)
-irt_50 <- gene(tmp, fs, 50,item.invariance = 'ess.equivalent', cores=10 )
-irt_75 <- gene(tmp, fs, 75,item.invariance = 'ess.equivalent' , cores=10)
-irt_100 <- gene(tmp, fs, 100,item.invariance = 'ess.equivalent' , cores=10)
-irt_125 <- gene(tmp, fs, 125,item.invariance = 'ess.equivalent' , cores=10)
+irt_25 <- gene(tmp, fs, 25, item.invariance = 'ess.equivalent', cores=60)
+saveRDS(irt_25, "../saves/irt_25.rds")
+irt_50 <- gene(tmp, fs, 50,item.invariance = 'ess.equivalent', cores=60)
+saveRDS(irt_50, "../saves/irt_50.rds")
+irt_75 <- gene(tmp, fs, 75,item.invariance = 'ess.equivalent' , cores=60)
+saveRDS(irt_75, "../saves/irt_75.rds")
+irt_100 <- gene(tmp, fs, 100,item.invariance = 'ess.equivalent' , cores=50)
+saveRDS(irt_100, "../saves/irt_100.rds")
+irt_125 <- gene(tmp, fs, 125,item.invariance = 'ess.equivalent' , cores=50)
+saveRDS(irt_125, "../saves/irt_125.rds")
 
 summary(irt_25$final, fit = TRUE, std = TRUE, rsquare=T)
 
+irt_25 <- readRDS("../saves/irt_25.rds")
+irt_50 <- readRDS("../saves/irt_50.rds")
+irt_75 <- readRDS("../saves/irt_75.rds")
+irt_100 <- readRDS("../saves/irt_100.rds")
 
 
 summary(irt_25)
@@ -147,11 +156,11 @@ rel75<-rel_m75[length(rel_m75)]
 rel100<-rel_m100[length(rel_m100)]
 rel125<-rel_m125[length(rel_m125)]
 
-rel<-data.frame(cbind(rel25,rel50, rel75, rel100, rel125))
-names(rel) <- c("m25","m50", "m75", "m100", "m125")
+rel<-data.frame(cbind(rel25,rel50, rel75, rel100))
+names(rel) <- c("m25","m50", "m75", "m100")
 rownames(rel) <- c("rel")
 
-fit_m25<-summary(m_25$final, fit = TRUE, std = TRUE, rsquare=T)$fit[c("chisq", "df", "cfi", "rmsea", "srmr", "aic", "bic", "bic2")]
+fit_m25<-summary(irt_25$final, fit = TRUE, std = TRUE, rsquare=T)$fit[c("chisq", "df", "cfi", "rmsea", "srmr", "aic", "bic", "bic2")]
 fit_m50<-summary(m_50$final, fit = TRUE, std = TRUE, rsquare=T)$fit[c("chisq", "df", "cfi", "rmsea", "srmr", "aic", "bic", "bic2")]
 fit_m75<-summary(m_75$final, fit = TRUE, std = TRUE, rsquare=T)$fit[c("chisq", "df", "cfi", "rmsea", "srmr", "aic", "bic", "bic2")]
 fit_m100<-summary(m_100$final, fit = TRUE, std = TRUE, rsquare=T)$fit[c("chisq", "df", "cfi", "rmsea", "srmr", "aic", "bic", "bic2")]
@@ -165,22 +174,22 @@ round(fit,2)
 
 save(fit, file="fit.rda")
 
-par_m25<-summary(m_25$final, fit = TRUE, std = TRUE, rsquare=T)
-par_m50<-summary(m_50$final, fit = TRUE, std = TRUE, rsquare=T)
-par_m75<-summary(m_75$final, fit = TRUE, std = TRUE, rsquare=T)
-par_m100<-summary(m_100$final, fit = TRUE, std = TRUE, rsquare=T)
+par_m25<-summary(irt_25$final, fit = TRUE, std = TRUE, rsquare=T)
+par_m50<-summary(irt_50$final, fit = TRUE, std = TRUE, rsquare=T)
+par_m75<-summary(irt_75$final, fit = TRUE, std = TRUE, rsquare=T)
+par_m100<-summary(irt_100$final, fit = TRUE, std = TRUE, rsquare=T)
 par_m125<-summary(m_125$final, fit = TRUE, std = TRUE, rsquare=T)
 
 
-par<-list(list(par_m25,par_m50, par_m75, par_m100, par_m125))
+par<-list(list(par_m25,par_m50, par_m75, par_m100))
 str(par)
 
-res_m25<-summary(m_25)
-res_m50<-summary(m_50)
-res_m75<-summary(m_75)
-res_m100<-summary(m_100)
+res_m25<-summary(irt_25)
+res_m50<-summary(irt_50)
+res_m75<-summary(irt_75)
+res_m100<-summary(irt_100)
 res_m125<-summary(m_125)
-res<-list(res_m25,res_m50, res_m75, res_m100, res_m125)
+res<-list(res_m25,res_m50, res_m75, res_m100)
 
 save(res, file="res.rda")
 save.image("short_scale.RData")

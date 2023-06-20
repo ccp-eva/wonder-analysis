@@ -12,3 +12,13 @@ wonder_word_list_natalia.xlsx
 data/.DS_Store
 
 .DS_Store
+
+saves/irt1.rds
+saves/irt_100.rds
+saves/irt1_fit_sel.rds
+saves/freq100.rds
+saves/freq125.rds
+saves/freq150.rds
+saves/freq175.rds
+saves/freq200.rds
+saves/freqAll.rds
