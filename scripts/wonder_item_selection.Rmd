@@ -16,7 +16,9 @@ library(testing)
 #library(geomtextpath)
 library(ggridges)
 library(lavaan)
-#library(ggbreak)
+library(ggbreak)
+library(grid)
+library(cowplot)
 
 estimate_mode <- function(s) {
   d <- density(s)
@@ -39,10 +41,7 @@ func <- function(x){
 ```
 
 ```{r}
-subjects <- readRDS("../saves/subjects.rds")
-
 data <- read_csv("../data/wonder_data.csv")%>%
-  filter(subjID %in% subjects)%>%
   mutate(age_group = factor(substr(age, 1,1)))
 
 irt_dat <- data%>%
@@ -414,22 +413,26 @@ miAllSel <- miAll%>%
 
 saveRDS(miAllSel, "../saves/miAllSel.rds")
 
+mod <- readRDS("../saves/miAllSel.rds")
 
+
+ggplot(mod, aes(x = mi))+
+  geom_vline(xintercept = c(50,100), lty = 3)+
+  geom_vline(xintercept = median(mi), lty = 2)+
+  geom_histogram(fill= NA, col = "black")+
+  theme_minimal()
 ```
 
 # Indices
 
 ```{r}
-mi <- readRDS("../saves/miAllSel.rds")%>%arrange(rhs)
+mi <- readRDS("../saves/miAllSel.rds")%>%arrange(rhs)%>%pull(mi)
 items <-data%>%filter(word %in% fit_selected_items)%>%distinct(word)%>%arrange(word)%>%pull(word)
 easiness_1PL_fit_sel <- ranef(irt1_fit_sel)$word%>%as_tibble(rownames = "word")%>%arrange(word) %>%pull(Estimate.Intercept)
 infit_fit_sel <- rasch_fit_mode_fit_sel %>% filter(fit_index == "infit")%>%arrange(word)%>% pull(mode)
 outfit_fit_sel <- rasch_fit_mode_fit_sel %>% filter(fit_index == "outfit")%>%arrange(word)%>% pull(mode)
 disc_2PL_fit_sel <- coef(irt2PL_fit_sel)$word[, , "logalpha_Intercept"] %>% as_tibble(rownames = "word")%>%arrange(word)%>%pull(Estimate)
 ```
-
-
-
 
 # Item selection
 
@@ -443,7 +446,7 @@ source("../scripts/helper/simulated_annealing.R")
 
 ```{r, message=F, warning=F, comment=F}
 
-sim_rasch_test <- simulated_annealing_rasch(50)
+sim_rasch_test <- simulated_annealing_rasch(150)
 
 sel_items_rasch_test <- items[unlist(sim_rasch_test$best_subset) == TRUE]
 
@@ -464,6 +467,7 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
   xlim(0,1.02)+
   theme_few()
 
+simulated_annealing_rasch(150)
 ```
 
 ## Determine size
@@ -475,11 +479,7 @@ ggplot(comp_rasch_test, aes(x = mean_full, y = mean_sub))+
 # 
 # saveRDS(full_model_ci_range, "../saves/full_model_ci_range.rds")
 
-ci_ranges <- #readRDS("../saves/determine_size.rds")%>%
-  #mutate(type = "1PL params only")%>%
-  bind_rows(readRDS("../saves/determine_size_w2PL.rds"))%>%
-  #bind_rows(readRDS("../saves/full_model_ci_range.rds")%>%mutate(iter = 1, type = "1PL params only"))%>%
-  bind_rows(readRDS("../saves/full_model_ci_range.rds")%>%mutate(iter = 1, type = "with 2PL disc params"))%>%
+ci_ranges <- readRDS("../saves/determine_size.rds")%>%
   group_by(size,iter, type)%>%
   mutate(ci_range = Q97.5.Intercept - Q2.5.Intercept)%>%
   summarise(mean_ci_range = mean(ci_range))
@@ -493,7 +493,7 @@ ggplot(ci_ranges, aes(x = size, y = mean_ci_range, col = factor(iter)))+
   scale_color_colorblind(name = "Run")+
   #facet_grid(iter~type)+
   #ylim(0.5,2)+
-  scale_x_continuous(breaks = c(50,75,100,125,150,175,200,225,250,270),labels = c(50,75,100,125,150,175,200,225,250,"all items"))+
+  scale_x_continuous(breaks = c(50,75,100,125,150,175,200),labels = c(50,75,100,125,150,175,200))+
   theme_bw()
 ```
 
@@ -692,266 +692,238 @@ ggsave("../graphs/selection_comp.pdf", height = 18, width = 10, scale = 1.5)
 ```
 
 
-### Refit frequentist model for different sizes
 
-#### 75 Items
+## Model comparison
+
+### modindex / 50
 
 ```{r}
-sel_items_75 <- readRDS("../saves/determine_size.rds")%>%
-  filter(size == 75)%>%
-  select(items)%>%
-  unnest()%>%
-  group_by(items)%>%
-  summarise(n = n())%>%
-  arrange(-n)%>%
-  head(75)%>%
-  pull(items)
+bind_rows(
+  readRDS("../saves/model_comparison.rds")%>%mutate(iter = c(rep(1,8), rep(2, 8))),
+  readRDS("../saves/model_comparison_narrow.rds"),
+  readRDS("../saves/model_comparison_narrow2.rds")
+  )%>%
+  filter(model == "m1PL")%>%
+  ggplot(aes(x = factor(size)))+
+  geom_bar(stat = "count", fill = NA, col = "black")+
+  theme_bw()
+```
 
 
-irt_75 <- irt_dat%>%
-  filter(word %in% sel_items_75)%>%
+```{r}
+
+bind_rows(
+  readRDS("../saves/model_comparison.rds")%>%mutate(iter = c(rep(1,8), rep(2, 8))),
+  readRDS("../saves/model_comparison_narrow.rds"),
+  readRDS("../saves/model_comparison_narrow2.rds")
+  )%>%
+  mutate(ratio = abs(elpd_diff) / (2*se_diff))%>%
+  mutate(ratio = ifelse( elpd_diff == 0,0,ratio))%>%
+  filter(ratio != 0)%>%
+  mutate(ratio = ifelse(model == "m2PL", ratio*-1, ratio))%>%
+  arrange(iter, size)%>%
+  #pivot_longer(cols = c(ratio, correlation), names_to = "type",values_to = "value")%>%
+  ggplot(aes(y = size, x = ratio, col = factor(iter)))+
+  geom_vline(xintercept = c(-1,1), alpha = .5, col = "#31493C", lty = 3)+
+  geom_vline(xintercept = 0, col = "black", lty = 1, size = 1)+
+  geom_point(alpha = .75)+
+  #geom_line(aes(group = size), alpha = .25)+
+  #geom_path(aes(group = iter), alpha = .25)+
+  scale_y_continuous(breaks = c(70,75,80,85,90,95,100,125,175))+
+  scale_x_continuous( limits = c(-6,6), breaks = c(-5,-2, -1, 0, 1, 2, 5), labels = c("5.00","2.00","1.00","0.00", "1.00","2.00", "5.00"))+
+  scale_color_ptol(guide = "none")+
+  #geom_line()+
+  #facet_grid(type~. , scales = "free_y")+
+  theme_bw()+
+  ggtitle("Modindex / 50")+
+  theme(panel.grid.minor = element_blank())+
+  labs(y = "No. of items in subset", x = expression(paste("Model comparison: ", frac(Delta ~ elpd, "2 *"~SE(Delta ~ elpd)))))+
+  annotation_custom(textGrob("1PL wins", 
+                             gp=gpar(fontsize=13,
+                                     col = "black", 
+                                     fontface="bold")),
+                    xmin=-3, xmax=-3, ymin=160, ymax=160) +
+  annotation_custom(textGrob("2PL wins",
+                             gp=gpar(fontsize=13,
+                                     col = "black",
+                                     fontface="bold")),
+                    xmin=3, xmax=3, ymin=160, ymax=160)
+
+```
+
+```{r}
+ggsave("../graphs/model_comparison_mi_50.pdf", width = 6, height = 4, scale = 1.25)
+```
+
+### modindex / 100
+
+```{r}
+bind_rows(
+  readRDS("../saves/model_comparison_narrow_100.rds"),
+  readRDS("../saves/model_comparison_narrow_100_2.rds"),
+  readRDS("../saves/model_comparison_narrow_100_3.rds")
+  )%>%
+  filter(model == "m1PL")%>%
+  ggplot(aes(x = factor(size)))+
+  geom_bar(stat = "count", fill = NA, col = "black")+
+  theme_bw()
+```
+
+
+```{r}
+
+bind_rows(
+  readRDS("../saves/model_comparison_narrow_100.rds"),
+  readRDS("../saves/model_comparison_narrow_100_2.rds"),
+  readRDS("../saves/model_comparison_narrow_100_3.rds")
+  )%>%
+  mutate(ratio = abs(elpd_diff) / (2*se_diff))%>%
+  mutate(ratio = ifelse( elpd_diff == 0,0,ratio))%>%
+  filter(ratio != 0)%>%
+  mutate(ratio = ifelse(model == "m2PL", ratio*-1, ratio))%>%
+  arrange(iter, size)%>%
+  #pivot_longer(cols = c(ratio, correlation), names_to = "type",values_to = "value")%>%
+  ggplot(aes(y = size, x = ratio, col = factor(iter)))+
+  geom_vline(xintercept = c(-1,1), alpha = .5, col = "#31493C", lty = 3)+
+  geom_vline(xintercept = 0, col = "black", lty = 1, size = 1)+
+  geom_point(alpha = .75)+
+  #geom_line(aes(group = size), alpha = .25)+
+  #geom_path(aes(group = iter), alpha = .25)+
+  scale_y_continuous(breaks = c(70,75,80,85,90,95,100,125,175))+
+  scale_x_continuous( limits = c(-6,6), breaks = c(-5,-2, -1, 0, 1, 2, 5), labels = c("5.00","2.00","1.00","0.00", "1.00","2.00", "5.00"))+
+  scale_color_ptol(guide = "none")+
+  #geom_line()+
+  #facet_grid(type~. , scales = "free_y")+
+  theme_bw()+
+  ggtitle("Modindex / 100")+
+  theme(panel.grid.minor = element_blank())+
+  labs(y = "No. of items in subset", x = expression(paste("Model comparison: ", frac(Delta ~ elpd, "2 *"~SE(Delta ~ elpd)))))+
+  annotation_custom(textGrob("1PL wins", 
+                             gp=gpar(fontsize=13,
+                                     col = "black", 
+                                     fontface="bold")),
+                    xmin=-3, xmax=-3, ymin=160, ymax=160) +
+  annotation_custom(textGrob("2PL wins",
+                             gp=gpar(fontsize=13,
+                                     col = "black",
+                                     fontface="bold")),
+                    xmin=3, xmax=3, ymin=160, ymax=160)
+
+```
+
+```{r}
+ggsave("../graphs/model_comparison_mi_100.pdf", width = 6, height = 4, scale = 1.25)
+```
+
+## Model comparison gene algorythm
+
+### 75 items
+
+```{r}
+gene75 <- readRDS("../saves/irt_75.rds")
+
+summary(gene75$final, fit = TRUE, std = TRUE, rsquare=T)
+
+items_genes_75 <- gene75$solution$f%>%as_tibble(rownames = "item")%>%
+  filter(value == T)%>%
+  pull(item)
+
+dat_gene_75 <- read_csv("../data/wonder_data.csv")%>%filter(word %in% items_genes_75)
+
+m1PL_gene_75 <- update(irt1_fit_sel, newdata =dat_gene_75, chains = 6, cores = 6, threads = threading(4), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+
+saveRDS(m1PL_gene_75, "../saves/m1PL_gene_75.rds")
+
+m2PL_gene_75 <- update(irt2PL_fit_sel, newdata =dat_gene_75, chains = 6, cores = 6, threads = threading(4), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+
+saveRDS(m2PL_gene_75, "../saves/m2PL_gene_75.rds")
+
+comp_gene_75 <- loo_compare(m1PL_gene_75, m2PL_gene_75)%>%as_tibble(rownames = "model")
+
+saveRDS(comp_gene_75, "../saves/comp_gene_75.rds")
+
+comp_gene_75 <- readRDS("../saves/comp_gene_75.rds")
+
+```
+
+```{r}
+irt_75_gene <- irt_dat%>%
+  filter(word %in% items_genes_75)%>%
   select(-aoa_rating_german)%>%
   pivot_wider(names_from = word, values_from = score)%>%
   select( -subjID, -sex)
 
-model75x <- paste(paste0("1*",sel_items_75, "+"), collapse = " ")
+model75genex <- paste(paste0("1*",items_genes_75, "+"), collapse = " ")
 
-model75 <- paste0("f =~", substr(model75x, 1, nchar(model75x)-1))
+model75gene <- paste0("f =~", substr(model75genex, 1, nchar(model75genex)-1))
 
-freq75 <- sem(model75, irt_75, ordered =TRUE, parameterization = "theta")
+freq75gene <- sem(model75gene, irt_75_gene, ordered =TRUE, parameterization = "theta")
 # 
-# saveRDS(freq75, "../saves/freq75.rds")
+saveRDS(freq75gene, "../saves/freq75gene.rds")
 # 
 # #summary(freq75, fit = TRUE, std = TRUE, rsquare=T)
 
-freq75 <- readRDS("../saves/freq75.rds")
+freq75gene <- readRDS("../saves/freq75gene.rds")
 
-fit_in_75 <- fitMeasures(freq75)%>%as_tibble(rownames = "index")%>%
-  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
-  mutate(no_items = 75)
-
-
-
+fitMeasures(freq75gene)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")
 ```
 
-#### 100 items
+
+### 100 items
 
 ```{r}
-# sel_items_100 <- readRDS("../saves/determine_size.rds")%>%
-#   filter(size == 100)%>%
-#   select(items)%>%
-#   unnest()%>%
-#   group_by(items)%>%
-#   summarise(n = n())%>%
-#   arrange(-n)%>%
-#   head(100)%>%
-#   pull(items)
-# 
-# irt_100 <- irt_dat%>%
-#   filter(word %in% sel_items_100)%>%
-#   select(-aoa_rating_german)%>%
-#   pivot_wider(names_from = word, values_from = score)%>%
-#   select( -subjID, -sex)
-# 
-# model100x <- paste(paste0("1*",sel_items_100, "+"), collapse = " ")
-# 
-# model100 <- paste0("f =~", substr(model100x, 1, nchar(model100x)-1))
-# 
-# freq100 <- sem(model100, irt_100, ordered =TRUE, parameterization = "theta")
-# 
-# saveRDS(freq100, "../saves/freq100.rds")
-# 
-# #summary(freq100, fit = TRUE, std = TRUE, rsquare=T)
+gene100 <- readRDS("../saves/irt_100.rds")
 
-freq100 <- readRDS("../saves/freq100.rds")
+items_genes_100 <- read_csv("../data/wonder_irt_data.csv")%>%
+  filter(word %in% readRDS("../saves/fit_selected_items_old.rds"))%>%
+  distinct(word)%>%
+  mutate(no = row_number())%>%
+  left_join(gene100$solution$f%>%as_tibble(rownames = "item")%>%
+  mutate(no = row_number()))%>%
+  filter(value == TRUE)%>%
+  pull(word)
 
-fit_in_100 <- fitMeasures(freq100)%>%as_tibble(rownames = "index")%>%
+dat_gene_100 <- read_csv("../data/wonder_data.csv")%>%filter(word %in% items_genes_100)
+
+m1PL_gene_100 <- update(irt1_fit_sel, newdata =dat_gene_100, chains = 6, cores = 6, threads = threading(4), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+
+saveRDS(m1PL_gene_100, "../saves/m1PL_gene_100.rds")
+
+m2PL_gene_100 <- update(irt2PL_fit_sel, newdata =dat_gene_100, chains = 6, cores = 6, threads = threading(4), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+
+saveRDS(m2PL_gene_100, "../saves/m2PL_gene_100.rds")
+
+comp_gene_100 <- loo_compare(m1PL_gene_100, m2PL_gene_100)%>%as_tibble(rownames = "model")
+
+saveRDS(comp_gene_100, "../saves/comp_gene_100.rds")
+
+comp_gene_100
+```
+
+```{r}
+irt_100_gene <- irt_dat%>%
+  filter(word %in% items_genes_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model100genex <- paste(paste0("1*",items_genes_100, "+"), collapse = " ")
+
+model100gene <- paste0("f =~", substr(model100genex, 1, nchar(model100genex)-1))
+
+freq100gene <- sem(model100gene, irt_100_gene, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq100gene, "../saves/freq100gene.rds")
+# 
+# #summary(freq75, fit = TRUE, std = TRUE, rsquare=T)
+
+freq100gene <- readRDS("../saves/freq100gene.rds")
+
+fit_in_100gene <- fitMeasures(freq100gene)%>%as_tibble(rownames = "index")%>%
   filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
   mutate(no_items = 100)
-
 ```
-
-#### 125 items
-
-```{r}
-# sel_items_125 <- readRDS("../saves/determine_size.rds")%>%
-#   filter(size == 125)%>%
-#   select(items)%>%
-#   unnest()%>%
-#   group_by(items)%>%
-#   summarise(n = n())%>%
-#   arrange(-n)%>%
-#   head(125)%>%
-#   pull(items)
-# 
-# irt_125 <- irt_dat%>%
-#   filter(word %in% sel_items_125)%>%
-#   select(-aoa_rating_german)%>%
-#   pivot_wider(names_from = word, values_from = score)%>%
-#   select( -subjID, -sex)
-# 
-# model125x <- paste(paste0("1*",sel_items_125, "+"), collapse = " ")
-# 
-# model125 <- paste0("f =~", substr(model125x, 1, nchar(model125x)-1))
-# 
-# freq125 <- sem(model125, irt_125, ordered =TRUE, parameterization = "theta")
-# 
-# #summary(freq125, fit = TRUE, std = TRUE, rsquare=T)
-# 
-# saveRDS(freq125, "../saves/freq125.rds")
-
-freq125 <- readRDS("../saves/freq125.rds")
-
-fit_in_125 <- fitMeasures(freq125)%>%as_tibble(rownames = "index")%>%
-  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
-  mutate(no_items = 125)
-
-```
-#### 150 items
-
-```{r}
-# sel_items_150 <- readRDS("../saves/determine_size.rds")%>%
-#   filter(size == 150)%>%
-#   select(items)%>%
-#   unnest()%>%
-#   group_by(items)%>%
-#   summarise(n = n())%>%
-#   arrange(-n)%>%
-#   head(150)%>%
-#   pull(items)
-# 
-# irt_150 <- irt_dat%>%
-#   filter(word %in% sel_items_150)%>%
-#   select(-aoa_rating_german)%>%
-#   pivot_wider(names_from = word, values_from = score)%>%
-#   select( -subjID, -sex)
-# 
-# model150x <- paste(paste0("1*",sel_items_150, "+"), collapse = " ")
-# 
-# model150 <- paste0("f =~", substr(model150x, 1, nchar(model150x)-1))
-# 
-# freq150 <- sem(model150, irt_150, ordered =TRUE, parameterization = "theta")
-# 
-# #summary(freq150, fit = TRUE, std = TRUE, rsquare=T)
-# 
-# saveRDS(freq150, "../saves/freq150.rds")
-
-freq150 <- readRDS("../saves/freq150.rds")
-
-fit_in_150 <- fitMeasures(freq150)%>%as_tibble(rownames = "index")%>%
-  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
-  mutate(no_items = 150)
-```
-
-
-#### 175 items
-
-```{r}
-# sel_items_175 <- readRDS("../saves/determine_size.rds")%>%
-#   filter(size == 175)%>%
-#   select(items)%>%
-#   unnest()%>%
-#   group_by(items)%>%
-#   summarise(n = n())%>%
-#   arrange(-n)%>%
-#   head(175)%>%
-#   pull(items)
-# 
-# irt_175 <- irt_dat%>%
-#   filter(word %in% sel_items_175)%>%
-#   select(-aoa_rating_german)%>%
-#   pivot_wider(names_from = word, values_from = score)%>%
-#   select( -subjID, -sex)
-# 
-# model175x <- paste(paste0("1*",sel_items_175, "+"), collapse = " ")
-# 
-# model175 <- paste0("f =~", substr(model175x, 1, nchar(model175x)-1))
-# 
-# freq175 <- sem(model175, irt_175, ordered =TRUE, parameterization = "theta")
-# 
-# saveRDS(freq175, "../saves/freq175.rds")
-
-freq175 <- readRDS("../saves/freq175.rds")
-
-#summary(freq175, fit = TRUE, std = TRUE, rsquare=T)
-
-fit_in_175 <- fitMeasures(freq175)%>%as_tibble(rownames = "index")%>%
-  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
-  mutate(no_items = 175)
-```
-
-#### 200 items
-
-```{r}
-# sel_items_200 <- readRDS("../saves/determine_size.rds")%>%
-#   filter(size == 200)%>%
-#   select(items)%>%
-#   unnest()%>%
-#   group_by(items)%>%
-#   summarise(n = n())%>%
-#   arrange(-n)%>%
-#   head(200)%>%
-#   pull(items)
-# 
-# irt_200 <- irt_dat%>%
-#   filter(word %in% sel_items_200)%>%
-#   select(-aoa_rating_german)%>%
-#   pivot_wider(names_from = word, values_from = score)%>%
-#   select( -subjID, -sex)
-# 
-# model200x <- paste(paste0("1*",sel_items_200, "+"), collapse = " ")
-# 
-# model200 <- paste0("f =~", substr(model200x, 1, nchar(model200x)-1))
-# 
-# freq200 <- sem(model200, irt_200, ordered =TRUE, parameterization = "theta")
-# 
-# saveRDS(freq200, "../saves/freq200.rds")
-
-freq200 <- readRDS("../saves/freq200.rds")
-
-#summary(freq200, fit = TRUE, std = TRUE, rsquare=T)
-
-fit_in_200 <- fitMeasures(freq200)%>%as_tibble(rownames = "index")%>%
-  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
-  mutate(no_items = 200)
-```   
-
-
-#### Plot fit indices
-
-```{r}
-fit_in <- bind_rows(
-fit_in_75,
-fit_in_100,
-fit_in_125,
-fit_in_150,
-fit_in_175,
-fit_in_200
-)%>%
-  mutate(cutoff = ifelse(index == "cfi", 0.95, 0.05))
-
-ggplot(fit_in, aes(x = factor(no_items), y = value, col = index))+
-    geom_hline(aes(yintercept = cutoff), lty = 3, alpha = .75)+
-    geom_point()+
-    geom_line(aes(group = (index)))+
-    scale_color_colorblind()+
-    scale_y_continuous(limits = c(0,1))+
-    scale_y_break(c(0.15, 0.9 ) )+
-  labs(x = "No of items", y = "Index value")+
-    theme_bw()
-
-```
-```{r}
-ggsave("../graphs/fit_indices.pdf", width = 8, height = 6, scale = 1.25)
-```
-
-
-## Model comparison
-
-```{r}
-readRDS("../saves/model_comparison.rds")
-```
-
 
 ## Word type by size
 
@@ -986,47 +958,979 @@ ggplot(type_size, aes(x = size, y = prop_type, col = word_type))+
   theme_bw()
 ```
 
+# Selected items
 
-
-
-
-
-## Extract selected items
+## modindex / 50 
 
 ```{r}
-selected_items <- readRDS("../saves/determine_size_w2PL.rds")%>%
-  filter(size == 175)%>%
-  select(items, iter)%>%
-  distinct(items, iter)%>%
-  unnest(items)%>%
-  rename(word = items)%>%
-  left_join(data%>%distinct(word, word_type))
-  
-selected_items%>%
-  group_by(word,word_type)%>%
-  summarise(n = n()/max(iter))%>%
-  ggplot(aes(x = reorder(word, -n), y = n, fill = word_type))+
-  geom_bar(stat = "identity", col = "black")+
-  labs(x = "Item", y = "Proportion selected")+
-  #facet_grid(~word_type)+
-  theme_minimal()+
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+mi <- readRDS("../saves/miAllSel.rds")%>%arrange(rhs)%>%pull(mi)
+items <-data%>%filter(word %in% readRDS("../saves/fit_selected_items.rds"))%>%distinct(word)%>%arrange(word)%>%pull(word)
+easiness_1PL_fit_sel <- ranef(irt1_fit_sel)$word%>%as_tibble(rownames = "word")%>%arrange(word) %>%pull(Estimate.Intercept)
+infit_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds") %>% filter(fit_index == "infit")%>%arrange(word)%>% pull(mode)
+outfit_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds") %>% filter(fit_index == "outfit")%>%arrange(word)%>% pull(mode)
+
+source("../scripts/helper/simulated_annealing.R")
+
+selection <- tibble()
+
+for(j in c(125,150,175,200)){
+
+  for (i in c(1:20)) {
+
+    sim <- simulated_annealing_rasch(j)
+
+    sel <- items[unlist(sim$best_subset) == TRUE]
+
+  	x <- tibble(items = list(sel), size = j, iter = i)
+
+    selection <- bind_rows(selection, x)
+
+    saveRDS(selection, "../saves/item_selection.rds")
+  }
+
+}
 
 
-rasch_selected_items <- selected_items%>%
-  group_by(word,word_type)%>%
-  summarise(n = n()/max(iter))%>%
+```
+
+## modindex / 100 
+
+```{r}
+
+selection_100 <- readRDS("../saves/item_selection_100.rds")
+
+```
+
+## Word types
+
+```{r}
+readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 95)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
   arrange(-n)%>%
-  ungroup()%>%
-  head(175)%>%
+  head(75)%>%
+  rename(word = items)%>%
   select(-n)%>%
-  pull(word)
+  left_join(data%>%distinct(word, word_type))%>%
+  mutate(n = n())%>%
+  ungroup()%>%
+  group_by(word_type)%>%
+  summarise(prop = n()/75)
 
-#write_csv(rasch_selected_items,"../data/selected_items.csv")
+```
 
-saveRDS(rasch_selected_items, "../saves/selected_items_rasch.rds")
 
-rasch_selected_items <- readRDS("../saves/selected_items_rasch.rds")
+# Refit frequentist model for different sizes
+
+## modindex / 50 
+
+#### 70 Items
+
+```{r}
+sel_items_70 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 70)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(70)%>%
+  pull(items)
+
+
+irt_70 <- irt_dat%>%
+  filter(word %in% sel_items_70)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model70x <- paste(paste0("1*",sel_items_70, "+"), collapse = " ")
+
+model70 <- paste0("f =~", substr(model70x, 1, nchar(model70x)-1))
+
+freq70 <- sem(model70, irt_70, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq70, "../saves/freq70.rds")
+# 
+# #summary(freq70, fit = TRUE, std = TRUE, rsquare=T)
+
+freq70 <- readRDS("../saves/freq70.rds")
+
+fit_in_70 <- fitMeasures(freq70)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 70)
+
+
+
+```
+
+#### 75 Items
+
+```{r}
+sel_items_75 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 75)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(75)%>%
+  pull(items)
+
+
+irt_75 <- irt_dat%>%
+  filter(word %in% sel_items_75)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model75x <- paste(paste0("1*",sel_items_75, "+"), collapse = " ")
+
+model75 <- paste0("f =~", substr(model75x, 1, nchar(model75x)-1))
+
+freq75 <- sem(model75, irt_75, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq75, "../saves/freq75.rds")
+# 
+# #summary(freq75, fit = TRUE, std = TRUE, rsquare=T)
+
+freq75 <- readRDS("../saves/freq75.rds")
+
+fit_in_75 <- fitMeasures(freq75)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 75)
+
+
+
+```
+
+#### 80 items
+
+```{r}
+sel_items_80 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 80)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(80)%>%
+  pull(items)
+
+irt_80 <- irt_dat%>%
+  filter(word %in% sel_items_80)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model80x <- paste(paste0("1*",sel_items_80, "+"), collapse = " ")
+
+model80 <- paste0("f =~", substr(model80x, 1, nchar(model80x)-1))
+
+freq80 <- sem(model80, irt_80, ordered =TRUE, parameterization = "theta")
+
+saveRDS(freq80, "../saves/freq80.rds")
+# 
+# #summary(freq100, fit = TRUE, std = TRUE, rsquare=T)
+
+freq80 <- readRDS("../saves/freq80.rds")
+
+fit_in_80 <- fitMeasures(freq80)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 80)
+
+```
+
+#### 85 items
+
+```{r}
+sel_items_85 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 85)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(85)%>%
+  pull(items)
+
+irt_85 <- irt_dat%>%
+  filter(word %in% sel_items_85)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model85x <- paste(paste0("1*",sel_items_85, "+"), collapse = " ")
+
+model85 <- paste0("f =~", substr(model85x, 1, nchar(model85x)-1))
+
+freq85 <- sem(model85, irt_85, ordered =TRUE, parameterization = "theta")
+
+saveRDS(freq85, "../saves/freq85.rds")
+# 
+# #summary(freq100, fit = TRUE, std = TRUE, rsquare=T)
+
+freq85 <- readRDS("../saves/freq85.rds")
+
+fit_in_85 <- fitMeasures(freq85)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 85)
+
+```
+
+#### 90 items
+
+```{r}
+sel_items_90 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 90)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(90)%>%
+  pull(items)
+
+irt_90 <- irt_dat%>%
+  filter(word %in% sel_items_90)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model90x <- paste(paste0("1*",sel_items_90, "+"), collapse = " ")
+
+model90 <- paste0("f =~", substr(model90x, 1, nchar(model90x)-1))
+
+freq90 <- sem(model90, irt_90, ordered =TRUE, parameterization = "theta")
+
+saveRDS(freq90, "../saves/freq90.rds")
+# 
+# #summary(freq100, fit = TRUE, std = TRUE, rsquare=T)
+
+freq90 <- readRDS("../saves/freq90.rds")
+
+fit_in_90 <- fitMeasures(freq90)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 90)
+
+```
+
+#### 95 Items
+
+```{r}
+sel_items_95 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 95)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(95)%>%
+  pull(items)
+
+
+irt_95 <- irt_dat%>%
+  filter(word %in% sel_items_95)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model95x <- paste(paste0("1*",sel_items_95, "+"), collapse = " ")
+
+model95 <- paste0("f =~", substr(model95x, 1, nchar(model95x)-1))
+
+freq95 <- sem(model95, irt_95, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq95, "../saves/freq95.rds")
+# 
+# #summary(freq95, fit = TRUE, std = TRUE, rsquare=T)
+
+freq95 <- readRDS("../saves/freq95.rds")
+
+fit_in_95 <- fitMeasures(freq95)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 95)
+
+```
+
+#### 100 Items
+
+```{r}
+sel_items_100 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 100)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(100)%>%
+  pull(items)
+
+irt_100 <- irt_dat%>%
+  filter(word %in% sel_items_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model100x <- paste(paste0("1*",sel_items_100, "+"), collapse = " ")
+
+model100 <- paste0("f =~", substr(model100x, 1, nchar(model100x)-1))
+
+freq100 <- sem(model100, irt_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq100, "../saves/freq100.rds")
+# 
+# #summary(freq100, fit = TRUE, std = TRUE, rsquare=T)
+
+freq100 <- readRDS("../saves/freq100.rds")
+
+fit_in_100 <- fitMeasures(freq100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 100)
+
+```
+#### 125 Items
+
+```{r}
+sel_items_125 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 125)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(125)%>%
+  pull(items)
+
+irt_125 <- irt_dat%>%
+  filter(word %in% sel_items_125)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model125x <- paste(paste0("1*",sel_items_125, "+"), collapse = " ")
+
+model125 <- paste0("f =~", substr(model125x, 1, nchar(model125x)-1))
+
+freq125 <- sem(model125, irt_125, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq125, "../saves/freq125.rds")
+# 
+# #summary(freq125, fit = TRUE, std = TRUE, rsquare=T)
+
+freq125 <- readRDS("../saves/freq125.rds")
+
+fit_in_125 <- fitMeasures(freq125)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 125)
+
+```
+
+#### 150 Items
+
+```{r}
+sel_items_150 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 150)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(150)%>%
+  pull(items)
+
+irt_150 <- irt_dat%>%
+  filter(word %in% sel_items_150)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model150x <- paste(paste0("1*",sel_items_150, "+"), collapse = " ")
+
+model150 <- paste0("f =~", substr(model150x, 1, nchar(model150x)-1))
+
+freq150 <- sem(model150, irt_150, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq150, "../saves/freq150.rds")
+# 
+# #summary(freq150, fit = TRUE, std = TRUE, rsquare=T)
+
+freq150 <- readRDS("../saves/freq150.rds")
+
+fit_in_150 <- fitMeasures(freq150)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 150)
+
+```
+
+
+#### 175 Items
+
+```{r}
+sel_items_175 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 175)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(175)%>%
+  pull(items)
+
+irt_175 <- irt_dat%>%
+  filter(word %in% sel_items_175)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model175x <- paste(paste0("1*",sel_items_175, "+"), collapse = " ")
+
+model175 <- paste0("f =~", substr(model175x, 1, nchar(model175x)-1))
+
+freq175 <- sem(model175, irt_175, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq175, "../saves/freq175.rds")
+# 
+# #summary(freq175, fit = TRUE, std = TRUE, rsquare=T)
+
+freq175 <- readRDS("../saves/freq175.rds")
+
+fit_in_175 <- fitMeasures(freq175)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 175)
+
+```
+
+#### 200 Items
+
+```{r}
+sel_items_200 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 200)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(200)%>%
+  pull(items)
+
+irt_200 <- irt_dat%>%
+  filter(word %in% sel_items_200)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model200x <- paste(paste0("1*",sel_items_200, "+"), collapse = " ")
+
+model200 <- paste0("f =~", substr(model200x, 1, nchar(model200x)-1))
+
+freq200 <- sem(model200, irt_200, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq200, "../saves/freq200.rds")
+# 
+# #summary(freq200, fit = TRUE, std = TRUE, rsquare=T)
+
+freq200 <- readRDS("../saves/freq200.rds")
+
+fit_in_200 <- fitMeasures(freq200)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 200)
+
+```
+
+#### Plot fit indices
+
+```{r}
+fit_in <- bind_rows(
+fit_in_70,
+fit_in_75,
+fit_in_80,
+fit_in_85,
+fit_in_90,
+fit_in_95,
+fit_in_100,
+fit_in_125,
+fit_in_150,
+fit_in_175,
+#fit_in_200
+)%>%
+  mutate(cutoff = ifelse(index == "cfi", 0.95, 0.05))
+
+ggplot(fit_in, aes(x = factor(no_items), y = value, col = index))+
+    geom_hline(aes(yintercept = cutoff), lty = 3, alpha = .75)+
+  geom_hline(yintercept = 0.08, lty = 3, alpha = .75)+
+    geom_point()+
+    geom_line(aes(group = (index)))+
+    scale_color_colorblind()+
+  ggtitle("Modindex / 50")+
+    scale_y_continuous(limits = c(0,1), breaks = c(0,0.02, 0.05, 0.08,0.1, 0.9,0.95, 1))+
+    scale_y_break(c(0.1, 0.9 ) )+
+  labs(x = "No of items", y = "Index value")+
+    theme_bw()+
+  theme(legend.position = "bottom")
+
+```
+```{r}
+ggsave("../graphs/fit_indices_mi_50.pdf", width = 6, height = 6, scale = 1)
+```
+
+## modindex / 100
+
+#### 70 Items
+
+```{r}
+sel_items_70_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 70)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(70)%>%
+  pull(items)
+
+
+irt_70_100 <- irt_dat%>%
+  filter(word %in% sel_items_70_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model70_100x <- paste(paste0("1*",sel_items_70_100, "+"), collapse = " ")
+
+model70_100 <- paste0("f =~", substr(model70_100x, 1, nchar(model70_100x)-1))
+
+freq70_100 <- sem(model70_100, irt_70_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq70_100, "../saves/freq70_100.rds")
+# 
+# #summary(freq70, fit = TRUE, std = TRUE, rsquare=T)
+
+freq70_100 <- readRDS("../saves/freq70_100.rds")
+
+fit_in_70_100 <- fitMeasures(freq70_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 70)
+
+
+
+```
+
+#### 75 Items
+
+```{r}
+sel_items_75_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 75)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(75)%>%
+  pull(items)
+
+
+irt_75_100 <- irt_dat%>%
+  filter(word %in% sel_items_75_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model75_100x <- paste(paste0("1*",sel_items_75_100, "+"), collapse = " ")
+
+model75_100 <- paste0("f =~", substr(model75_100x, 1, nchar(model75_100x)-1))
+
+freq75_100 <- sem(model75_100, irt_75_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq75_100, "../saves/freq75_100.rds")
+# 
+
+freq75_100 <- readRDS("../saves/freq75_100.rds")
+
+fit_in_75_100 <- fitMeasures(freq75_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 75)
+
+
+
+```
+
+#### 80 items
+
+```{r}
+sel_items_80_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 80)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(80)%>%
+  pull(items)
+
+
+irt_80_100 <- irt_dat%>%
+  filter(word %in% sel_items_80_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model80_100x <- paste(paste0("1*",sel_items_80_100, "+"), collapse = " ")
+
+model80_100 <- paste0("f =~", substr(model80_100x, 1, nchar(model80_100x)-1))
+
+freq80_100 <- sem(model80_100, irt_80_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq80_100, "../saves/freq80_100.rds")
+# 
+
+freq80_100 <- readRDS("../saves/freq80_100.rds")
+
+fit_in_80_100 <- fitMeasures(freq80_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 80)
+
+```
+
+#### 85 items
+
+```{r}
+sel_items_85_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 85)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(85)%>%
+  pull(items)
+
+
+irt_85_100 <- irt_dat%>%
+  filter(word %in% sel_items_85_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model85_100x <- paste(paste0("1*",sel_items_85_100, "+"), collapse = " ")
+
+model85_100 <- paste0("f =~", substr(model85_100x, 1, nchar(model85_100x)-1))
+
+freq85_100 <- sem(model85_100, irt_85_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq85_100, "../saves/freq85_100.rds")
+# 
+
+freq85_100 <- readRDS("../saves/freq85_100.rds")
+
+fit_in_85_100 <- fitMeasures(freq85_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 85)
+
+```
+
+#### 90 items
+
+```{r}
+sel_items_90_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 90)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(90)%>%
+  pull(items)
+
+
+irt_90_100 <- irt_dat%>%
+  filter(word %in% sel_items_90_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model90_100x <- paste(paste0("1*",sel_items_90_100, "+"), collapse = " ")
+
+model90_100 <- paste0("f =~", substr(model90_100x, 1, nchar(model90_100x)-1))
+
+freq90_100 <- sem(model90_100, irt_90_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq90_100, "../saves/freq90_100.rds")
+# 
+
+freq90_100 <- readRDS("../saves/freq90_100.rds")
+
+fit_in_90_100 <- fitMeasures(freq90_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 90)
+
+```
+
+#### 95 Items
+
+```{r}
+sel_items_95_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 95)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(95)%>%
+  pull(items)
+
+
+irt_95_100 <- irt_dat%>%
+  filter(word %in% sel_items_95_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model95_100x <- paste(paste0("1*",sel_items_95_100, "+"), collapse = " ")
+
+model95_100 <- paste0("f =~", substr(model95_100x, 1, nchar(model95_100x)-1))
+
+freq95_100 <- sem(model95_100, irt_95_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq95_100, "../saves/freq95_100.rds")
+# 
+
+freq95_100 <- readRDS("../saves/freq95_100.rds")
+
+fit_in_95_100 <- fitMeasures(freq95_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 95)
+
+```
+
+#### 100 Items
+
+```{r}
+sel_items_100_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 100)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(100)%>%
+  pull(items)
+
+
+irt_100_100 <- irt_dat%>%
+  filter(word %in% sel_items_100_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model100_100x <- paste(paste0("1*",sel_items_100_100, "+"), collapse = " ")
+
+model100_100 <- paste0("f =~", substr(model100_100x, 1, nchar(model100_100x)-1))
+
+freq100_100 <- sem(model100_100, irt_100_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq100_100, "../saves/freq100_100.rds")
+# 
+
+freq100_100 <- readRDS("../saves/freq100_100.rds")
+
+fit_in_100_100 <- fitMeasures(freq100_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 100)
+
+```
+#### 125 Items
+
+```{r}
+sel_items_125_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 125)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(125)%>%
+  pull(items)
+
+
+irt_125_100 <- irt_dat%>%
+  filter(word %in% sel_items_125_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model125_100x <- paste(paste0("1*",sel_items_125_100, "+"), collapse = " ")
+
+model125_100 <- paste0("f =~", substr(model125_100x, 1, nchar(model125_100x)-1))
+
+freq125_100 <- sem(model125_100, irt_125_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq125_100, "../saves/freq125_100.rds")
+# 
+
+freq125_100 <- readRDS("../saves/freq125_100.rds")
+
+fit_in_125_100 <- fitMeasures(freq125_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 125)
+
+
+```
+
+#### 150 Items
+
+```{r}
+sel_items_150_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 150)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(150)%>%
+  pull(items)
+
+
+irt_150_100 <- irt_dat%>%
+  filter(word %in% sel_items_150_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model150_100x <- paste(paste0("1*",sel_items_150_100, "+"), collapse = " ")
+
+model150_100 <- paste0("f =~", substr(model150_100x, 1, nchar(model150_100x)-1))
+
+freq150_100 <- sem(model150_100, irt_150_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq150_100, "../saves/freq150_100.rds")
+# 
+
+freq150_100 <- readRDS("../saves/freq150_100.rds")
+
+fit_in_150_100 <- fitMeasures(freq150_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 150)
+
+```
+
+
+#### 175 Items
+
+```{r}
+sel_items_175_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 175)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(175)%>%
+  pull(items)
+
+
+irt_175_100 <- irt_dat%>%
+  filter(word %in% sel_items_175_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model175_100x <- paste(paste0("1*",sel_items_175_100, "+"), collapse = " ")
+
+model175_100 <- paste0("f =~", substr(model175_100x, 1, nchar(model175_100x)-1))
+
+freq175_100 <- sem(model175_100, irt_175_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq175_100, "../saves/freq175_100.rds")
+# 
+
+freq175_100 <- readRDS("../saves/freq175_100.rds")
+
+fit_in_175_100 <- fitMeasures(freq175_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 175)
+
+```
+
+#### 200 Items
+
+```{r}
+sel_items_200_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 200)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(200)%>%
+  pull(items)
+
+
+irt_200_100 <- irt_dat%>%
+  filter(word %in% sel_items_200_100)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+model200_100x <- paste(paste0("1*",sel_items_200_100, "+"), collapse = " ")
+
+model200_100 <- paste0("f =~", substr(model200_100x, 1, nchar(model200_100x)-1))
+
+freq200_100 <- sem(model200_100, irt_200_100, ordered =TRUE, parameterization = "theta")
+# 
+saveRDS(freq200_100, "../saves/freq200_100.rds")
+# 
+
+freq200_100 <- readRDS("../saves/freq200_100.rds")
+
+fit_in_200_100 <- fitMeasures(freq200_100)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")%>%
+  mutate(no_items = 200)
+
+```
+
+#### Plot fit indices
+
+```{r}
+fit_in_mi100 <- bind_rows(
+fit_in_70_100,
+fit_in_75_100,
+fit_in_80_100,
+fit_in_85_100,
+fit_in_90_100,
+fit_in_95_100,
+fit_in_100_100,
+fit_in_125_100,
+fit_in_150_100,
+fit_in_175_100
+)%>%
+  mutate(cutoff = ifelse(index == "cfi", 0.95, 0.05))
+
+ggplot(fit_in_mi100, aes(x = factor(no_items), y = value, col = index))+
+    geom_hline(aes(yintercept = cutoff), lty = 3, alpha = .75)+
+  geom_hline(yintercept = 0.08, lty = 3, alpha = .75)+
+    geom_point()+
+    geom_line(aes(group = (index)))+
+    scale_color_colorblind()+
+    ggtitle("Modindex / 100")+
+    scale_y_continuous(limits = c(0,1), breaks = c(0,0.02, 0.05, 0.08,0.1, 0.9,0.95, 1))+
+    scale_y_break(c(0.1, 0.9 ) )+
+  labs(x = "No of items", y = "Index value")+
+    theme_bw()+
+  theme(legend.position = "bottom")
+
+```
+```{r}
+ggsave("../graphs/fit_indices_mi_100.pdf", width = 6, height = 6, scale = 1)
+```
+
+
+```{r}
+ggsave("../graphs/mi_overview.pdf", width = 12, height = 6, scale = 1.25)
 ```
 
 # Rasch model with selected items
@@ -1034,14 +1938,30 @@ rasch_selected_items <- readRDS("../saves/selected_items_rasch.rds")
 ## Fit model 
 
 ```{r}
-irt_dat_sel <- irt_dat%>%
-  filter(word %in% rasch_selected_items)
+sel_items_90_100 <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 90)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(90)%>%
+  pull(items)
+
+irt_dat_sel_90 <- irt_dat%>%
+  filter(word %in% sel_items_90_100)
 ```
 
 
 ```{r}
-irt1_guess_sel <- brm(
-  data = irt_dat_sel,
+prior_1pl <- 
+  prior("normal(0, 1)", class = "sd", group = "subjID") + 
+  prior("normal(0, 3)", class = "sd", group = "word")
+```
+
+```{r}
+irt1_final_90 <- brm(
+  data = irt_dat_sel_90,
   family = bernoulli(),
   score ~ 1 + (1| word) + (1 | subjID),
   prior = prior_1pl,
@@ -1051,55 +1971,91 @@ irt1_guess_sel <- brm(
   iter = 8000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)%>%add_criterion(c("loo","waic")) 
+)%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
 
 
-saveRDS(irt1_guess_sel, "../saves/irt1_guess_sel.rds")
+saveRDS(irt1_final_90, "../saves/irt1_final_90.rds")
 
-irt1_guess_sel <- readRDS("../saves/irt1_guess_sel.rds")
+irt1_final_90 <- readRDS("../saves/irt1_final_90.rds")
 ```
 
 ## ICC
 
 ```{r}
-icc1_guess_sel <- posterior_samples(irt1_guess_sel)%>% 
-  select(b_eta_Intercept, starts_with("r_targetWord"))%>%
+icc1_final_90 <- posterior_samples(irt1_final_90)%>% 
+  select(b_Intercept, starts_with("r_word"))%>%
   mutate(iter = 1:n()) %>% 
-  pivot_longer(starts_with("r_targetWord"), names_to = "item", values_to = "xi") %>%
+  pivot_longer(starts_with("r_word"), names_to = "item", values_to = "xi") %>%
   mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
-  expand(nesting(iter, b_eta_Intercept, item, xi),
+  expand(nesting(iter, b_Intercept, item, xi),
          theta = seq(from = -6, to = 6, length.out = 100)) %>% 
-  mutate(p = 0.25 + 0.75*inv_logit_scaled((b_eta_Intercept + theta + xi))) %>%  
+  mutate(p = inv_logit_scaled(b_Intercept + xi + theta)) %>% 
   group_by(theta, item) %>% 
   summarise(p = mean(p))%>%
-  left_join(aoa%>%rename(item = targetWord))
+  left_join(aoa%>%rename(item = word))
+
+saveRDS(icc1_final_90, "../saves/icc1_final_90.rds")
+
+icc1_final_90 <- readRDS("../saves/icc1_final_90.rds")
 ```
 
 ```{r}
-icc1_guess_sel %>% 
-  ggplot(aes(x = theta, y = p,group = item, col = aoa_german_comb)) +
+icc1_final_90 %>% 
+  ggplot(aes(x = theta, y = p,group = item, col = aoa_rating_german)) +
   geom_line() +
-  #geom_textline(aes(label = item)) +
-  geom_hline(yintercept = 0.25, lty = 3, alpha = .75)+
+  #facet_wrap(~group)+
+  #guides(col = F)+
   scale_color_viridis_c(name = "AoA") +
   labs(title = "ICCs for the 1PL",
        x = expression(theta~('ability on the logit scale')),
        y = expression(italic(p)(y==1))) +
-  ylim(0,1)+
   theme_minimal()
 ```
 
 ```{r}
-ggsave("../graphs/ICC_1PL_sel.png", height = 6, width = 10, scale = 1, bg = "white")
+ggsave("../graphs/ICC_1PL_90_final.pdf", height = 6, width = 12, scale = 1, bg = "white")
 ```
+
+## Test information curve
+
+```{r}
+tic1_final_90 <- as_draws_df(irt1_final_90) %>% 
+  select(.draw, b_Intercept, starts_with("r_word")) %>% 
+  pivot_longer(starts_with("r_word"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
+  expand(nesting(.draw, b_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 200)) %>% 
+  mutate(p = inv_logit_scaled(b_Intercept + xi + theta)) %>% 
+  mutate(i = p * (1 - p)) %>% 
+  
+  # this is where the TIC magic happens
+  group_by(theta, .draw) %>% 
+  summarise(sum_i = sum(i)) %>% 
+  group_by(theta) %>% 
+  summarise(i = median(sum_i))
+  
+saveRDS(tic1_final_90, "../saves/tic1_final_90.rds")
+
+tic1_final_90 <- readRDS("../saves/tic1_final_90.rds")
+
+
+ggplot(tic1_final_90, aes(x = theta, y = i)) +
+  geom_line() +
+  labs(title = "The test information curve for the 1PL",
+       #subtitle = "The curve is based on the posterior median.", 
+       x = expression(theta~('ability on the logit scale')),
+       y = "information") +
+  theme_few()
+```
+
 
 ## Differential Item Functioning
 
 ### Sex
 
 ```{r}
-irt1_dif_sex_sel <-  brm(
-  data = irt_dat_sel,
+irt1_final_90_dif_sex <-  brm(
+  data = irt_dat_sel_90,
   family = bernoulli(),
   score ~ 1 + (0+ sex | word) + (1 | subjID),
   prior = prior_1pl,
@@ -1109,12 +2065,12 @@ irt1_dif_sex_sel <-  brm(
   iter = 8000,
   threads = threading(8), #to speed things up, comment out if not on a cluster
   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)
+)%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
 
 
-saveRDS(irt1_dif_sex_sel, "../saves/irt1_dif_sex_sel.rds")
+saveRDS(irt1_final_90_dif_sex, "../saves/irt1_final_90_dif_sex.rds")
 
-irt1_dif_sex_sel<- readRDS("../saves/irt1_dif_sex_sel.rds")
+irt1_final_90_dif_sex<- readRDS("../saves/irt1_final_90_dif_sex.rds")
 
 ```
 
@@ -1122,13 +2078,13 @@ irt1_dif_sex_sel<- readRDS("../saves/irt1_dif_sex_sel.rds")
 ### Comapre models
 
 ```{r}
-loo_compare(irt1_guess_sel, irt1_guess_dif_order_sel, irt1_guess_dif_sex_sel)%>%as_tibble(rownames = "model")
+loo_compare(irt1_final_90, irt1_final_90_dif_sex)%>%as_tibble(rownames = "model")
 ```
 
 ### Visual model inspection
 
 ```{r}
-dif_sex <- as_draws_df(irt1_dif_sex_sel)%>%
+final_90_dif_sex <- as_draws_df(irt1_final_90_dif_sex)%>%
   select(b_Intercept, starts_with("r_word"))%>%
   mutate(iter = 1:n()) %>%
   pivot_longer(starts_with("r_word")) %>%
@@ -1143,11 +2099,15 @@ dif_sex <- as_draws_df(irt1_dif_sex_sel)%>%
             lci = hdi_lower(val))%>%
   left_join(aoa%>%rename(item = word))
 
-saveRDS(dif_sex, "../saves/model_params_irt1_dif_sex.rds")
+saveRDS(final_90_dif_sex, "../saves/model_params_irt1_final_90_dif_sex.rds")
 
-dif_sex <- readRDS("../saves/model_params_irt1_dif_sex.rds")
+final_90_dif_sex <- readRDS("../saves/model_params_irt1_final_90_dif_sex.rds")
 
-ggplot(dif_sex,aes(x = reorder(item, aoa_rating_german))) +
+final_90_dif_sex%>%
+  group_by(item)%>%
+  mutate(dif = abs(abs(mode) - lag(abs(mode))))%>%
+  fill(dif, .direction = "up")%>%
+ggplot(.,aes(x = reorder(item, dif))) +
 	geom_point(aes(col = sex, y = lci), position = position_dodge(width = .5)) +
   geom_point(aes(col = sex, y = uci), position = position_dodge(width = .5)) +
   geom_linerange(aes(col = sex, ymin = lci + 0.1, ymax = uci-0.1), position = position_dodge(width = .5), alpha = .5) +
@@ -1158,11 +2118,11 @@ ggplot(dif_sex,aes(x = reorder(item, aoa_rating_german))) +
 ```
 
 ```{r}
-ggsave("../graphs/dif_ci.png", height = 20, width = 10, scale = 1, bg = "white")
+ggsave("../graphs/dif_ci.pdf", height = 20, width = 10, scale = 1, bg = "white")
 ```
 
 ```{r}
-dif_sex%>%
+final_90_dif_sex%>%
   pivot_wider(names_from = sex, values_from = c(mode,uci,lci))%>%
   ggplot(., aes(x = mode_f, y = mode_m))+
   geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .75)+
@@ -1182,6 +2142,34 @@ dif_sex%>%
 ggsave("../graphs/dif_cor.png", height = 6, width = 6, scale = 1.2)
 ```
 
+# Final set of items
+
+```{r}
+final_items <- readRDS("../saves/item_selection_100.rds")%>%
+  filter(size == 90)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(90)%>%
+  filter(items != "verloben")%>%
+  pull(items)
+
+saveRDS(final_items, "../saves/final_items.rds")
+```
+
+```{r}
+data%>%
+  filter(word %in% final_items)%>%
+  group_by(word_type)%>%
+  summarise(n = n_distinct(word)/89)
+
+
+```
+
+
+
 # Reliability
 
 ## KR20
@@ -1190,7 +2178,7 @@ ggsave("../graphs/dif_cor.png", height = 6, width = 6, scale = 1.2)
 # full test
 rel_dat <- irt_dat%>%
   select(-sex, -aoa_rating_german)%>%
-  filter(word %in% readRDS( "../saves/fit_selected_items.rds"))%>%
+  filter(word %in% final_items)%>%
   group_by(subjID)%>%
   distinct(word, .keep_all = T)%>%
   pivot_wider(names_from = word, values_from = score)%>%
@@ -1200,94 +2188,17 @@ rel_dat <- irt_dat%>%
 kr20_rel <- kr20(rel_dat, hit = 1)
 
 kr20_rel
-
-# selected items
-
-rel_dat_sel <- irt_dat%>%
-  select(-sex, -aoa_rating_german)%>%
-  filter(word %in% readRDS( "../saves/fit_selected_items.rds"))%>%
-  group_by(subjID)%>%
-  distinct(targetWord, .keep_all = T)%>%
-  pivot_wider(names_from = targetWord, values_from = correct)%>%
-  ungroup()%>%
-  select(-subjID)
-
-kr20_rel_sel <- kr20(rel_dat_sel, hit = 1)
-
-kr20_rel_sel
 ```
 
 ## Andrich Reliability
 
 ```{r}
-# full task 
-pers_params <- ranef(irt1_fit_sel)$subjID%>%as_tibble(rownames = "subjID")
+pers_params <- ranef(irt1_final_90)$subjID%>%as_tibble(rownames = "subjID")
 
-
-sep_rel <- 1 - 
+rel <- 1 - 
   (1/length(pers_params$Estimate.Intercept) * sum(pers_params$Est.Error.Intercept^2))/
   (1/(length(pers_params$Estimate.Intercept)-1)*sum((pers_params$Estimate.Intercept - mean(pers_params$Estimate.Intercept))^2))
 
 
-sep_rel
-
-# selected items only 
-pers_params_sel <- ranef(irt1_guess_sel)$subjID%>%as_tibble(rownames = "subjID")
-
-
-sep_rel_sel <- 1 - 
-  (1/length(pers_params_sel$Estimate.eta_Intercept) * sum(pers_params_sel$Est.Error.eta_Intercept^2))/
-  (1/(length(pers_params_sel$Estimate.eta_Intercept)-1)*sum((pers_params_sel$Estimate.eta_Intercept - mean(pers_params_sel$Estimate.eta_Intercept))^2))
-
-
-sep_rel_sel
-```
-
-
-# Selected items compared to random subset
-
-```{r}
-
-new_items <- data%>%filter(source == "new items")%>%distinct(targetWord)%>%pull(targetWord)
-
-cor_random <- tibble()
-
-for (j in 10:20){
-  
-for (i in 1:100) {
-  
-   sel <- sample(new_items, j)
-
-   cor <- data%>%
-      filter(targetWord %in% sel)%>%
-      group_by(subjID)%>%
-  summarise(mean_sub = mean(correct))%>%
-  right_join(full)%>%
-  summarise(cor = cor(mean_sub, mean_full))%>%
-  mutate(iter = i, 
-         size = j)
-  
-  cor_random <- bind_rows(cor_random, cor)
-}
-
-}
-  
-saveRDS(cor_random, "../saves/cor_random.rds")
-
-cor_random <- readRDS("../saves/cor_random.rds")
-
-rasch_selected_items
-```
-
-```{r}
-cor_random%>%
-  ggplot(aes(x = cor, y = factor(size)))+
-  geom_vline(xintercept = determine_size%>%filter(iter ==1, size == 22)%>%pull(correlation), lty = 3, alpha = .75)+
-  stat_binline(alpha = .75) +
-  labs(x = "Correlation subtest with full test", y = "No. of newly added items in subset")+
-  theme_few()+
-  theme(axis.ticks.y = element_blank())
-```
-```{r}
-ggsave("../graphs/rand_sel_cor.png", height = 6, width = 8, scale = 1)
+rel
 ```

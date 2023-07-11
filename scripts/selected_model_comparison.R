@@ -13,17 +13,17 @@ irt1_fit_sel <- readRDS("../saves/irt1_fit_sel.rds")
 
 rasch_fit_mode_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds")
 
-fit_selected_items <- readRDS( "../saves/fit_selected_items.rds")
+#fit_selected_items <- readRDS( "../saves/fit_selected_items.rds")
 
 irt2PL_fit_sel <- readRDS("../saves/irt2PL_fit_sel.rds")
 
 ## make indices
 
-items <-data%>%filter(word %in% fit_selected_items)%>%distinct(word)%>%pull(word)
-easiness_1PL_fit_sel <- ranef(irt1_fit_sel)$word%>%as_tibble(rownames = "item") %>%pull(Estimate.Intercept)
+mi <- readRDS("../saves/miAllSel.rds")%>%arrange(rhs)%>%pull(mi)
+items <-data%>%filter(word %in% readRDS("../saves/fit_selected_items.rds"))%>%distinct(word)%>%arrange(word)%>%pull(word)
+easiness_1PL_fit_sel <- ranef(irt1_fit_sel)$word%>%as_tibble(rownames = "word")%>%arrange(word) %>%pull(Estimate.Intercept)
 infit_fit_sel <- rasch_fit_mode_fit_sel %>% filter(fit_index == "infit")%>%arrange(word)%>% pull(mode)
 outfit_fit_sel <- rasch_fit_mode_fit_sel %>% filter(fit_index == "outfit")%>%arrange(word)%>% pull(mode)
-disc_2PL_fit_sel <- coef(irt2PL_fit_sel)$word[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
 
 source("../scripts/helper/simulated_annealing.R")
 
@@ -31,9 +31,9 @@ source("../scripts/helper/simulated_annealing.R")
 
 model_comparison <- tibble()
 
- # for(j in 5:5){
+for(j in 1:2){
 
-  for (i in c(100,150,200)) {
+  for (i in c(100,125, 175)) {
 
     sim <- simulated_annealing_rasch(i)
 
@@ -41,16 +41,16 @@ model_comparison <- tibble()
 
     sub_dat <- irt_dat%>%filter(word %in% sel)
 
-    m1PL <- update(irt1_fit_sel, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
-  	m2PL <- update(irt2PL_fit_sel, newdata =sub_dat, chains = 6, cores = 6, threads = threading(8), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+    m1PL <- update(irt1_fit_sel, newdata =sub_dat, chains = 6, cores = 6, threads = threading(6), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+  	m2PL <- update(irt2PL_fit_sel, newdata =sub_dat, chains = 6, cores = 6, threads = threading(6), backend = "cmdstanr")%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
 
-  	comp <- loo_compare(m1PL, m2PL)%>%as_tibble(rownames = "model")%>%mutate(items = list(sel), size = i)%>%mutate_at(c(2:9), as.numeric)
+  	comp <- loo_compare(m1PL, m2PL)%>%as_tibble(rownames = "model")%>%mutate(items = list(sel), size = i, iter = j)%>%mutate_at(c(2:9), as.numeric)
 
     model_comparison <- bind_rows(model_comparison, comp)
 
-    saveRDS(model_comparison, "../saves/model_comparison.rds")
+    saveRDS(model_comparison, "../saves/model_comparison_narrow_100_3.rds")
   }
 
- # }
+}
 
-saveRDS(model_comparison, "../saves/model_comparison.rds")
+saveRDS(model_comparison, "../saves/model_comparison_narrow_100_3.rds")

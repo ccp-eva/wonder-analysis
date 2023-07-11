@@ -1,11 +1,16 @@
 items <- items
+mi <- mi
 easiness <- easiness_1PL_fit_sel
 infit <- infit_fit_sel
 outfit <- outfit_fit_sel
-disc_2PL <- disc_2PL_fit_sel
+#disc_2PL <- disc_2PL_fit_sel
 
 func <- function(x){
   abs(1-x)
+}
+
+func2 <- function(x){
+  x/100
 }
 
 score_fn <- function(subset) {
@@ -16,8 +21,8 @@ score_fn <- function(subset) {
   }
   spacing <- -1*sd(nn_dists)/3
   
-  var_disc_sample <- disc_2PL[subset]
-  var_disc_2PL <- -1*var(var_disc_sample)*10
+  # var_disc_sample <- disc_2PL[subset]
+  # var_disc_2PL <- -1*var(var_disc_sample)*10
   
   infit_sample <- infit[subset]
   infit_dist <- unlist(lapply(infit_sample, func))
@@ -27,7 +32,11 @@ score_fn <- function(subset) {
   outfit_dist <- unlist(lapply(outfit_sample, func))
   mean_outfit <- -2*mean(outfit_dist)
   
-  return(spacing + mean_infit + mean_outfit+ var_disc_2PL)
+  mi_sample <- mi[subset]
+  mi_dist <- unlist(lapply(outfit_sample, func2))
+  mean_mi <- -1*mean(mi_dist)
+  
+  return(spacing + mean_infit + mean_outfit+ mean_mi)
   #return(spacing + mean_infit + mean_outfit)
 }
 
