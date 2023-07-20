@@ -31,9 +31,9 @@ source("../scripts/helper/simulated_annealing.R")
 
 model_comparison <- tibble()
 
-for(j in 1:2){
+for(j in 1:5){
 
-  for (i in c(100,125, 175)) {
+  for (i in c(70,75,80,85,90,95,100,125, 175)) {
 
     sim <- simulated_annealing_rasch(i)
 
@@ -48,9 +48,9 @@ for(j in 1:2){
 
     model_comparison <- bind_rows(model_comparison, comp)
 
-    saveRDS(model_comparison, "../saves/model_comparison_narrow_100_3.rds")
+    saveRDS(model_comparison, "../saves/model_comparison.rds")
   }
 
 }
 
-saveRDS(model_comparison, "../saves/model_comparison_narrow_100_3.rds")
+saveRDS(model_comparison, "../saves/model_comparison.rds")

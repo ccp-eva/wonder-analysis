@@ -771,6 +771,13 @@ bind_rows(
 
 
 ```{r}
+bind_rows(
+  readRDS("../saves/model_comparison_narrow_100.rds"),
+  readRDS("../saves/model_comparison_narrow_100_2.rds"),
+  readRDS("../saves/model_comparison_narrow_100_3.rds")
+  )%>%
+  saveRDS("../saves/model_comparison_size.rds")
+
 
 bind_rows(
   readRDS("../saves/model_comparison_narrow_100.rds"),
@@ -2161,10 +2168,17 @@ saveRDS(final_items, "../saves/final_items.rds")
 
 ```{r}
 data%>%
+  filter(word %in% readRDS("../saves/final_items.rds"))%>%
+  distinct(word, english, word_type)%>%
+  write_csv("../data/wonder_final_item_list.csv")
+```
+
+
+```{r}
+data%>%
   filter(word %in% final_items)%>%
   group_by(word_type)%>%
   summarise(n = n_distinct(word)/89)
-
 
 ```
 

@@ -15,7 +15,7 @@ outfit_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds") %>% filter(fit_
 
 source("../scripts/helper/simulated_annealing.R")
 
-selection_100 <- tibble()
+selection <- tibble()
 
 for(j in c(70,75,80,85,90,95,100,125,150,175,200)){
   
@@ -27,9 +27,9 @@ for(j in c(70,75,80,85,90,95,100,125,150,175,200)){
     
     x <- tibble(items = list(sel), size = j, iter = i)
     
-    selection_100 <- bind_rows(selection_100, x)
+    selection <- bind_rows(selection, x)
     
-    saveRDS(selection_100, "../saves/item_selection_100.rds")
+    saveRDS(selection, "../saves/item_selection.rds")
   }
   
 }

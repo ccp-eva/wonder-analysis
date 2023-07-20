@@ -83,6 +83,17 @@ read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjähri
 ```
 
 ```{r}
+filtered_data%>%
+  group_by(subjID)%>%
+  summarise(n = n())%>%
+  mutate(complete = ifelse(n == 379, "yes", "no"))%>%
+  group_by(complete)%>%
+  summarise(n = n_distinct(subjID))
+```
+
+
+
+```{r}
 data <- filtered_data%>%
   distinct(subjID, word, .keep_all = T)%>%
   left_join(dem)%>%
@@ -95,8 +106,32 @@ data <- filtered_data%>%
   ungroup()%>%
   filter(subjID != "tGCnD9nu")
  
-write_csv(data, "../data/wonder_data.csv") 
+write_csv(data, "../data/wonder_data.csv")
 ```
+
+```{r}
+# participants
+participants <- filtered_data%>%
+  group_by(subjID)%>%
+  summarise(n = n())%>%
+  pull(subjID)
+
+
+bind_rows(
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet = 1),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =2),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =3),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =4),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =5),
+read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjährige.xlsx", sheet =6)
+) %>%
+  filter(Code %in% participants)%>%
+  distinct(`ID Nr.`, .keep_all = T)%>%
+  select(`ID Nr.`	,Nachname,	Vorname,	Geschlecht,	Geburtsdatum,	Code	,Email	, Email_1,	Email_2)%>%
+  write_xlsx(., "../data/wonder_raw_data/wonder_participants.xlsx")
+
+```
+
 
 ```{r}
 # orev link
@@ -137,12 +172,17 @@ read_xlsx("../../../../../Cloud/Shared/wonder_Emailversandt_Drei_bis_Achtjähri
 
 ```
 
+```{r}
+data <- read_csv("../data/wonder_data.csv") 
+```
 
 
 ```{r}
 # data%>%
 #   group_by(subjID)%>%
 #   summarise(n = n())
+
+range(data$age)
 
 data%>%
   group_by(subjID)%>%
@@ -193,11 +233,16 @@ data%>%
   group_by(word, aoa_rating_german)%>%
   summarise(mean = mean(score))%>%
   ggplot(aes(x = aoa_rating_german, y = mean))+
-  geom_smooth()+
+  geom_smooth(col = "firebrick", method = "lm")+
+  ylim(0, 1)+
   geom_point(pch = 1, alpha = 0.5)+
   stat_cor()+
   theme_bw()
 
+```
+
+```{r}
+ggsave("../graphs/perf_by_aoa.png", width = 7, height = 3, scale = 1)
 ```
 
 ```{r}
@@ -208,14 +253,18 @@ data%>%
   select(-n)%>%
   group_by(word, aoa_rating_german, word_type)%>%
   summarise(mean = mean(score))%>%
-  ggplot(aes(x = aoa_rating_german, y = mean))+
-  geom_smooth()+
+  ggplot(aes(x = aoa_rating_german, y = mean, col = word_type))+
+  geom_smooth( method = "lm")+
+  ylim(0,1)+
   geom_point(pch = 1, alpha = 0.5)+
-  stat_cor()+
-  facet_grid(~word_type)+
+  stat_cor(label.y.npc = "bottom", show.legend = FALSE)+
+  scale_color_colorblind()+
+  #facet_grid(~word_type)+
   theme_bw()
 ```
-
+```{r}
+ggsave("../graphs/perf_by_aoa.png", width = 7, height = 4, scale = 1)
+```
 
 ```{r}
 data%>%
@@ -228,11 +277,12 @@ data%>%
   summarise(mean = mean(score))%>%
   ggplot(aes(x = age, y = mean))+
   geom_point(pch = 1, alpha = 0.5)+
-  geom_smooth()+
+  geom_smooth(col = "firebrick", method = "lm")+
   stat_cor()+
   #facet_grid(~word_type)+
   theme_bw()
 ```
+
 
 ```{r}
 data%>%
@@ -243,13 +293,18 @@ data%>%
   group_by(subjID, age, word_type)%>%
   #group_by(subjID, age)%>%
   summarise(mean = mean(score))%>%
-  ggplot(aes(x = age, y = mean))+
+  ggplot(aes(x = age, y = mean, col = word_type))+
   geom_point(pch = 1, alpha = 0.5)+
-  geom_smooth()+
-  stat_cor()+
-  facet_grid(~word_type)+
+  geom_smooth(method = "lm")+
+  stat_cor(show.legend = F)+
+  scale_color_colorblind()+
+  #facet_grid(~word_type)+
   theme_bw()
 ```
+```{r}
+ggsave("../graphs/perf_by_age.png", width = 7, height = 4, scale = 1)
+```
+
 
 ```{r}
 p1 <- data%>%

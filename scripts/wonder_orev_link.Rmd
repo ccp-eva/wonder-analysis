@@ -11,6 +11,8 @@ library(tidyboot)
 library(brms)
 library(ggthemes)
 library(geomtextpath)
+library(tidybayes)
+
 ```
 
 # new Data
@@ -31,18 +33,8 @@ link_data <- wonder_data%>%
   ungroup()%>%
   distinct(subjID, .keep_all = T)
 
-sel_items <- readRDS("../saves/determine_size.rds")%>%
-  filter(size == 75)%>%
-  distinct(iter,items)%>%
-  unnest()%>%
-  group_by(items)%>%
-  summarise(n = n())%>%
-  arrange(-n)%>%
-  head(75)%>%
-  pull(items)
-
 link_data_select <- wonder_data%>%
-  filter(word %in% sel_items)%>%
+  filter(word %in% readRDS("../saves/final_items.rds"))%>%
   group_by(age, subjID)%>%
   summarise(wonder = mean(score))%>%
   left_join(orev_data%>%
@@ -86,7 +78,7 @@ ggplot(link_data_select, aes(x = wonder, y = orev, col = age_group))+
   geom_point(pch = 19,stroke = F,  alpha = .5, size = 2)+
   stat_cor(inherit.aes = F, aes(x = wonder, y = orev))+
   #geom_smooth(method = "lm", inherit.aes = F, aes(x = wonder, y = orev))+
-  facet_wrap(~age_group)+
+  #facet_wrap(~age_group)+
   lims(x = c(0,1), y = c(0,1))+
   theme_bw()
 ```
@@ -97,6 +89,7 @@ ppcor::pcor.test(link_data_select$wonder, link_data_select$orev, link_data_selec
 
 ```{r}
 m_won_orev <- wonder_data%>%
+  filter(word %in% readRDS("../saves/final_items.rds"))%>%
   group_by(subjID)%>%
   group_by(age, subjID)%>%
   summarise(sum  = sum(score),
@@ -126,6 +119,7 @@ orev_d <- read_csv("../../vocab/data/clean_data.csv")%>%
   summarise(orev = mean(correct))
 
 wonder_d <- wonder_data%>%
+  filter(word %in% readRDS("../saves/final_items.rds"))%>%
   group_by(age, subjID)%>%
   summarise(wonder = mean(score))
 
@@ -151,6 +145,7 @@ ppcor::pcor.test(orev_wonder$wonder, orev_wonder$orev, orev_wonder$age)
 
 ```{r}
 om_won_orev <- wonder_data%>%
+  filter(word %in% readRDS("../saves/final_items.rds"))%>%
   group_by(age, subjID)%>%
   summarise(sum  = sum(score),
             n = n())%>%
@@ -166,7 +161,6 @@ om1 <- brm(sum |trials(n) ~ age + orev, family = binomial, data = om_won_orev, c
 
 
 ```{r}
-library(tidybayes)
 
 bind_rows(
 m1 %>%

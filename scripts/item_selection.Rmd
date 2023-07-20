@@ -1,0 +1,564 @@
+---
+title: "Item selection"
+output: html_document
+date: "2023-07-20"
+---
+
+# Packages
+
+```{r setup, include=FALSE}
+library(tidyverse)
+#library(ggpubr)
+library(ggthemes)
+library(tidybayes)
+library(brms)
+library(rstan)
+library(loo)
+library(coda)
+library(testing)
+#library(geomtextpath)
+library(ggridges)
+library(lavaan)
+library(ggbreak)
+library(grid)
+library(cowplot)
+
+estimate_mode <- function(s) {
+  d <- density(s)
+  return(d$x[which.max(d$y)])
+}
+
+hdi_upper<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","upper"])
+}
+
+hdi_lower<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","lower"])
+}
+
+func <- function(x){
+  abs(1-x)
+}
+```
+
+# Data
+
+```{r}
+data <- read_csv("../data/wonder_data.csv")%>%
+  mutate(age_group = factor(substr(age, 1,1)))
+
+irt_dat <- data%>%
+  select(subjID, word, score, sex, aoa_rating_german)#%>%
+  #filter(word %in% fit_selected_items)%>%
+  #mutate(subjID = paste0("id", as.numeric(as.factor(subjID))))
+
+#write_csv(irt_dat, "../data/wonder_irt_data.csv")
+
+aoa <- data%>%distinct(word, .keep_all = T)%>%select(word, aoa_rating_german)
+
+full <- data%>%
+  group_by(subjID)%>%
+  summarise(mean_full = mean(score))
+
+```
+
+# Item selection
+
+## Step 1: Selection based on In- and Outfit
+
+### 1PL model with all items
+
+```{r}
+prior_1pl <- 
+  prior("normal(0, 1)", class = "sd", group = "subjID") + 
+  prior("normal(0, 3)", class = "sd", group = "word")
+```
+
+#### Model
+
+```{r}
+# irt1 <- brm(
+#   data = irt_dat,
+#   family = bernoulli(),
+#   score ~ 1 + (1 | word) + (1 | subjID),
+#   prior = prior_1pl,
+#   control = list(adapt_delta = 0.95, max_treedepth = 20),
+#   cores = 6,
+#   chains = 6,
+#   iter = 6000,
+#   threads = threading(8), #to speed things up, comment out if not on a cluster
+#   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+# )
+# 
+# saveRDS(irt1, "../saves/irt1.rds")
+# 
+# irt1 <- add_criterion(
+#   irt1,
+#   criterion = c("loo","waic"),
+#   cores = 1,
+#   ndraws = 2000
+# )
+# 
+# saveRDS(irt1, "../saves/irt1.rds")
+
+irt1 <- readRDS("../saves/irt1.rds")
+```
+
+#### Extract In- and Outfit
+
+```{r}
+rasch_fit_draws <- irt_dat%>%
+  add_epred_draws(irt1, re_formula = ~(1 | word) + (1 | subjID), ndraws = 1000)
+  
+rasch_fit <- rasch_fit_draws%>%
+  mutate(zvi = (score - .epred)/(.epred*(1-.epred))^0.5)%>%
+  group_by(word,aoa_rating_german, .draw)%>%
+  summarise(outfit = sum(zvi^2)/length(unique(subjID)),
+            infit = (sum(zvi^2*(.epred*(1-.epred)))/sum(.epred*(1-.epred))))
+
+rasch_fit_mode <- rasch_fit%>%
+  pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
+  group_by(word, aoa_rating_german, fit_index)%>%
+  summarise(mode = estimate_mode(value),
+            lci = hdi_lower(value),
+            uci = hdi_upper(value))
+
+saveRDS(rasch_fit_mode, "../saves/rasch_fit_mode.rds")
+
+rasch_fit_mode <- readRDS("../saves/rasch_fit_mode.rds")
+
+```
+
+#### Select items
+
+```{r}
+# remove items that have very poor in and outfit 
+
+fit_selected_items <- rasch_fit_mode%>%ungroup()%>%filter(0.7 < mode & 1.3 > mode)%>%group_by(word)%>%mutate(n = n())%>%filter(n == 2)%>%distinct(word)%>%pull(word)
+
+saveRDS(fit_selected_items, "../saves/fit_selected_items.rds")
+
+fit_selected_items <- readRDS( "../saves/fit_selected_items.rds")
+
+```
+
+## Step 2: Compute indices for items selected in step 1
+
+### 1PL model for selected items
+
+Run script `run1PLmodel_sel_fit.R`
+
+```{r}
+irt1_fit_sel <- readRDS("../saves/irt1_fit_sel.rds")
+
+ranef(irt1_fit_sel)$word%>%as_tibble(rownames = "word")%>%saveRDS("../saves/easiness_1PL_sel.rds")
+
+```
+
+#### Extract In- and Outfit
+
+```{r}
+rasch_fit_draws_fit_sel <- irt_dat%>%
+  filter(word %in% fit_selected_items)%>%
+  add_epred_draws(irt1_fit_sel, re_formula = ~(1 | word) + (1 | subjID), ndraws = 1000)
+
+rasch_fit_fit_sel <- rasch_fit_draws_fit_sel%>%
+  mutate(zvi = (score - .epred)/(.epred*(1-.epred))^0.5)%>%
+  group_by(word,aoa_rating_german, .draw)%>%
+  summarise(outfit = sum(zvi^2)/length(unique(subjID)),
+            infit = (sum(zvi^2*(.epred*(1-.epred)))/sum(.epred*(1-.epred))))
+
+rasch_fit_mode_fit_sel <- rasch_fit_fit_sel%>%
+  pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
+  group_by(word, aoa_rating_german, fit_index)%>%
+  summarise(mode = estimate_mode(value),
+            lci = hdi_lower(value),
+            uci = hdi_upper(value))
+
+saveRDS(rasch_fit_mode_fit_sel, "../saves/rasch_fit_mode_fit_sel.rds")
+
+rasch_fit_mode_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds")
+
+rasch_fit_fit_sel <- rasch_fit_draws_fit_sel%>%
+  mutate(res = (score - .epred))%>%
+  summarise(rsmea = mean(res))
+```
+
+### Compute modindices based on frequentist model
+
+```{r}
+all_items <- irt_dat%>%
+  filter(word %in% fit_selected_items)%>%
+  distinct(word)%>%
+  pull(word)
+
+irt_all <- irt_dat%>%
+  filter(word %in% fit_selected_items)%>%
+  select(-aoa_rating_german)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  select( -subjID, -sex)
+
+modelAllx <- paste(paste0("1*",all_items, "+"), collapse = " ")
+
+modelAll <- paste0("f =~", substr(modelAllx, 1, nchar(modelAllx)-1))
+
+freqAll <- sem(modelAll, irt_all, ordered =TRUE, parameterization = "theta")
+
+saveRDS(freqAll, "../saves/freqAll.rds")
+
+freqAll <- readRDS("../saves/freqAll.rds")
+
+summary(freqAll, standardized = TRUE)
+
+miAll <- modindices(freqAll)
+
+miAllSel <- miAll%>%
+  filter(lhs == "f")
+  
+
+saveRDS(miAllSel, "../saves/miAllSel.rds")
+
+mod <- readRDS("../saves/miAllSel.rds")
+```
+
+## Indices for item selection
+
+```{r}
+mi <- readRDS("../saves/miAllSel.rds")%>%arrange(rhs)%>%pull(mi)
+items <-data%>%filter(word %in% readRDS( "../saves/fit_selected_items.rds"))%>%distinct(word)%>%arrange(word)%>%pull(word)
+easiness_1PL_fit_sel <- readRDS("../saves/easiness_1PL_sel.rds")%>%arrange(word) %>%pull(Estimate.Intercept)
+infit_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds") %>% filter(fit_index == "infit")%>%arrange(word)%>% pull(mode)
+outfit_fit_sel <- readRDS("../saves/rasch_fit_mode_fit_sel.rds") %>% filter(fit_index == "outfit")%>%arrange(word)%>% pull(mode)
+```
+
+## Step 3: Simulated annealing
+
+```{r}
+source("../scripts/helper/simulated_annealing.R")
+```
+
+### Test run
+
+```{r, message=F, warning=F, comment=F}
+sim_test <- simulated_annealing_rasch(100)
+
+items[unlist(sim_test$best_subset) == TRUE]
+```
+
+### Compare 1PL and 2PL model for different sizes
+
+Run script `selected_model_comparison.R`
+
+#### Visualize Model comparison for different sizes
+
+```{r}
+readRDS("../saves/model_comparison_size.rds")%>%
+  mutate(ratio = abs(elpd_diff) / (2*se_diff))%>%
+  mutate(ratio = ifelse( elpd_diff == 0,0,ratio))%>%
+  filter(ratio != 0)%>%
+  mutate(ratio = ifelse(model == "m2PL", ratio*-1, ratio))%>%
+  arrange(iter, size)%>%
+  #pivot_longer(cols = c(ratio, correlation), names_to = "type",values_to = "value")%>%
+  ggplot(aes(y = size, x = ratio, col = factor(iter)))+
+  geom_vline(xintercept = c(-1,1), alpha = .5, col = "#31493C", lty = 3)+
+  geom_vline(xintercept = 0, col = "black", lty = 1, size = 1)+
+  geom_point(alpha = .75)+
+  #geom_line(aes(group = size), alpha = .25)+
+  #geom_path(aes(group = iter), alpha = .25)+
+  scale_y_continuous(breaks = c(70,75,80,85,90,95,100,125,175))+
+  scale_x_continuous( limits = c(-6,6), breaks = c(-5,-2, -1, 0, 1, 2, 5), labels = c("5.00","2.00","1.00","0.00", "1.00","2.00", "5.00"))+
+  scale_color_ptol(guide = "none")+
+  #geom_line()+
+  #facet_grid(type~. , scales = "free_y")+
+  theme_bw()+
+  ggtitle("Modindex / 100")+
+  theme(panel.grid.minor = element_blank())+
+  labs(y = "No. of items in subset", x = expression(paste("Model comparison: ", frac(Delta ~ elpd, "2 *"~SE(Delta ~ elpd)))))+
+  annotation_custom(textGrob("1PL wins", 
+                             gp=gpar(fontsize=13,
+                                     col = "black", 
+                                     fontface="bold")),
+                    xmin=-3, xmax=-3, ymin=160, ymax=160) +
+  annotation_custom(textGrob("2PL wins",
+                             gp=gpar(fontsize=13,
+                                     col = "black",
+                                     fontface="bold")),
+                    xmin=3, xmax=3, ymin=160, ymax=160)
+
+```
+
+### Select items for preferred size (90 items)
+
+Run script `item_selection.R`
+
+```{r}
+sel_items_90 <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 90)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(90)%>%
+  pull(items)
+
+```
+## Step 4: Differential item functioning (split by sex)
+
+### Model
+
+```{r}
+irt_dat_sel_90 <- irt_dat%>%
+  filter(word %in% sel_items_90)
+```
+
+```{r}
+irt1_final_90_dif_sex <-  brm(
+  data = irt_dat_sel_90,
+  family = bernoulli(),
+  score ~ 1 + (0+ sex | word) + (1 | subjID),
+  prior = prior_1pl,
+  control = list(adapt_delta = 0.95, max_treedepth = 20),
+  cores = 6,
+  chains = 6,
+  iter = 8000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+
+
+saveRDS(irt1_final_90_dif_sex, "../saves/irt1_final_90_dif_sex.rds")
+
+irt1_final_90_dif_sex<- readRDS("../saves/irt1_final_90_dif_sex.rds")
+
+```
+
+### Visual model inspection
+
+```{r}
+final_90_dif_sex <- as_draws_df(irt1_final_90_dif_sex)%>%
+  select(b_Intercept, starts_with("r_word"))%>%
+  mutate(iter = 1:n()) %>%
+  pivot_longer(starts_with("r_word")) %>%
+  mutate(name = str_remove(name, pattern = "r_word"),
+         name = str_remove_all(name, pattern = "\\[|\\]"))%>%
+  separate(name, into = c("item", "sex"), sep = "\\,")%>%
+  mutate(sex = str_remove(sex, pattern = "sex"),
+         val =  value)%>%
+  group_by(item, sex)%>%
+  summarise(mode = estimate_mode(val),
+            uci = hdi_upper(val),
+            lci = hdi_lower(val))%>%
+  left_join(aoa%>%rename(item = word))
+
+saveRDS(final_90_dif_sex, "../saves/model_params_irt1_final_90_dif_sex.rds")
+
+final_90_dif_sex <- readRDS("../saves/model_params_irt1_final_90_dif_sex.rds")
+
+final_90_dif_sex%>%
+  group_by(item)%>%
+  mutate(dif = abs(abs(mode) - lag(abs(mode))))%>%
+  fill(dif, .direction = "up")%>%
+ggplot(.,aes(x = reorder(item, dif))) +
+	geom_point(aes(col = sex, y = lci), position = position_dodge(width = .5)) +
+  geom_point(aes(col = sex, y = uci), position = position_dodge(width = .5)) +
+  geom_linerange(aes(col = sex, ymin = lci + 0.1, ymax = uci-0.1), position = position_dodge(width = .5), alpha = .5) +
+	coord_flip() +
+  scale_color_colorblind(labels = c("male","female"), name = "Group")+
+	labs(x = "Item", y = "Easiness estimate")+
+  theme_minimal()
+```
+
+```{r}
+ggsave("../graphs/dif_ci.pdf", height = 20, width = 10, scale = 1, bg = "white")
+```
+
+```{r}
+final_90_dif_sex%>%
+  pivot_wider(names_from = sex, values_from = c(mode,uci,lci))%>%
+  ggplot(., aes(x = mode_f, y = mode_m))+
+  geom_abline(intercept = 0, slope = 1, lty = 3, alpha = .75)+
+  geom_point(pch = 1, size = 2, stroke  = 1, aes(col = factor(aoa_rating_german)))+
+  geom_linerange(aes(ymin = lci_m, ymax = uci_m),  alpha = .25, lty = 1)+
+  geom_linerange(aes(xmin = lci_f, xmax = uci_f),  alpha = .25, lty = 1)+
+  #geom_text(aes(label = item, x = uci_f +0.2))+
+  labs(x = "Group: female", y = "Group: male")+
+  scale_color_viridis_d()+
+  guides(col = F)+
+  coord_fixed()+
+  theme_few()
+  
+```
+
+```{r}
+ggsave("../graphs/dif_cor.png", height = 6, width = 6, scale = 1.2)
+```
+
+## Final item selection
+
+```{r}
+final_items <- readRDS("../saves/item_selection.rds")%>%
+  filter(size == 90)%>%
+  select(items)%>%
+  unnest()%>%
+  group_by(items)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(90)%>%
+  filter(items != "verloben")%>%
+  pull(items)
+
+saveRDS(final_items, "../saves/final_items.rds")
+```
+
+```{r}
+data%>%
+  filter(word %in% readRDS("../saves/final_items.rds"))%>%
+  distinct(word, english, word_type)%>%
+  write_csv("../data/wonder_final_item_list.csv")
+```
+
+
+```{r}
+data%>%
+  filter(word %in% final_items)%>%
+  group_by(word_type)%>%
+  summarise(n = n_distinct(word)/89)
+
+```
+
+# Final model
+
+## Model
+
+```{r}
+irt_dat_final <- irt_dat%>%
+  filter(word %in% final_items)
+```
+
+
+```{r}
+irt1_final <- brm(
+  data = irt_dat_final,
+  family = bernoulli(),
+  score ~ 1 + (1| word) + (1 | subjID),
+  prior = prior_1pl,
+  control = list(adapt_delta = 0.95, max_treedepth = 20),
+  cores = 6,
+  chains = 6,
+  iter = 8000,
+  threads = threading(8), #to speed things up, comment out if not on a cluster
+  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+)%>%add_criterion(c("loo"), cores = 2, ndraws = 2000)
+
+
+saveRDS(irt1_final, "../saves/irt1_final.rds")
+
+irt1_final <- readRDS("../saves/irt1_final.rds")
+```
+
+## Item characteristics curves
+
+```{r}
+icc1_final_90 <- posterior_samples(irt1_final_90)%>% 
+  select(b_Intercept, starts_with("r_word"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_word"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
+  expand(nesting(iter, b_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  mutate(p = inv_logit_scaled(b_Intercept + xi + theta)) %>% 
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(aoa%>%rename(item = word))
+
+saveRDS(icc1_final_90, "../saves/icc1_final_90.rds")
+
+icc1_final_90 <- readRDS("../saves/icc1_final_90.rds")
+```
+
+```{r}
+icc1_final_90 %>% 
+  ggplot(aes(x = theta, y = p,group = item, col = aoa_rating_german)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  scale_color_viridis_c(name = "AoA") +
+  labs(title = "ICCs for the 1PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  theme_minimal()
+```
+
+```{r}
+ggsave("../graphs/ICC_1PL_90_final.pdf", height = 6, width = 12, scale = 1, bg = "white")
+```
+
+## Test information curve
+
+```{r}
+tic1_final_90 <- as_draws_df(irt1_final_90) %>% 
+  select(.draw, b_Intercept, starts_with("r_word")) %>% 
+  pivot_longer(starts_with("r_word"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
+  expand(nesting(.draw, b_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 200)) %>% 
+  mutate(p = inv_logit_scaled(b_Intercept + xi + theta)) %>% 
+  mutate(i = p * (1 - p)) %>% 
+  
+  # this is where the TIC magic happens
+  group_by(theta, .draw) %>% 
+  summarise(sum_i = sum(i)) %>% 
+  group_by(theta) %>% 
+  summarise(i = median(sum_i))
+  
+saveRDS(tic1_final_90, "../saves/tic1_final_90.rds")
+
+tic1_final_90 <- readRDS("../saves/tic1_final_90.rds")
+
+
+ggplot(tic1_final_90, aes(x = theta, y = i)) +
+  geom_line() +
+  labs(title = "The test information curve for the 1PL",
+       #subtitle = "The curve is based on the posterior median.", 
+       x = expression(theta~('ability on the logit scale')),
+       y = "information") +
+  theme_few()
+```
+
+
+# Reliability
+
+## KR20
+
+```{r}
+# full test
+rel_dat <- irt_dat%>%
+  select(-sex, -aoa_rating_german)%>%
+  filter(word %in% final_items)%>%
+  group_by(subjID)%>%
+  distinct(word, .keep_all = T)%>%
+  pivot_wider(names_from = word, values_from = score)%>%
+  ungroup()%>%
+  select(-subjID)
+
+kr20_rel <- kr20(rel_dat, hit = 1)
+
+kr20_rel
+```
+
+## Andrich Reliability
+
+```{r}
+pers_params <- ranef(irt1_final_90)$subjID%>%as_tibble(rownames = "subjID")
+
+rel <- 1 - 
+  (1/length(pers_params$Estimate.Intercept) * sum(pers_params$Est.Error.Intercept^2))/
+  (1/(length(pers_params$Estimate.Intercept)-1)*sum((pers_params$Estimate.Intercept - mean(pers_params$Estimate.Intercept))^2))
+
+
+rel
+```
+

@@ -3,7 +3,6 @@ mi <- mi
 easiness <- easiness_1PL_fit_sel
 infit <- infit_fit_sel
 outfit <- outfit_fit_sel
-#disc_2PL <- disc_2PL_fit_sel
 
 func <- function(x){
   abs(1-x)
