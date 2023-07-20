@@ -249,6 +249,12 @@ items[unlist(sim_test$best_subset) == TRUE]
 
 ### Compare 1PL and 2PL model for different sizes
 
+Run script `run2PLmodel_sel_fit.R` to fit 2PL model with selected items (needed for model comparison)
+
+```{r}
+irt2PL_fit_sel <- readRDS("../saves/irt2PL_fit_sel.rds")
+```
+
 Run script `selected_model_comparison.R`
 
 #### Visualize Model comparison for different sizes
@@ -462,7 +468,7 @@ irt1_final <- readRDS("../saves/irt1_final.rds")
 ## Item characteristics curves
 
 ```{r}
-icc1_final_90 <- posterior_samples(irt1_final_90)%>% 
+icc1_final <- posterior_samples(irt1_final)%>% 
   select(b_Intercept, starts_with("r_word"))%>%
   mutate(iter = 1:n()) %>% 
   pivot_longer(starts_with("r_word"), names_to = "item", values_to = "xi") %>%
@@ -474,32 +480,26 @@ icc1_final_90 <- posterior_samples(irt1_final_90)%>%
   summarise(p = mean(p))%>%
   left_join(aoa%>%rename(item = word))
 
-saveRDS(icc1_final_90, "../saves/icc1_final_90.rds")
+saveRDS(icc1_final, "../saves/icc1_final.rds")
 
-icc1_final_90 <- readRDS("../saves/icc1_final_90.rds")
+icc1_final <- readRDS("../saves/icc1_final.rds")
 ```
 
 ```{r}
-icc1_final_90 %>% 
+p_icc <- icc1_final %>% 
   ggplot(aes(x = theta, y = p,group = item, col = aoa_rating_german)) +
   geom_line() +
-  #facet_wrap(~group)+
-  #guides(col = F)+
-  scale_color_viridis_c(name = "AoA") +
-  labs(title = "ICCs for the 1PL",
-       x = expression(theta~('ability on the logit scale')),
+  scale_color_viridis_c(name = "Rated age of acquisition") +
+  labs(x = expression(theta~('ability on the logit scale')),
        y = expression(italic(p)(y==1))) +
-  theme_minimal()
-```
-
-```{r}
-ggsave("../graphs/ICC_1PL_90_final.pdf", height = 6, width = 12, scale = 1, bg = "white")
+  theme_minimal()+
+  theme(legend.background = element_blank(), legend.position = c(0.1, 0.8), legend.direction = "h")
 ```
 
 ## Test information curve
 
 ```{r}
-tic1_final_90 <- as_draws_df(irt1_final_90) %>% 
+tic1_final <- as_draws_df(irt1_final) %>% 
   select(.draw, b_Intercept, starts_with("r_word")) %>% 
   pivot_longer(starts_with("r_word"), names_to = "item", values_to = "xi") %>%
   mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
@@ -514,24 +514,31 @@ tic1_final_90 <- as_draws_df(irt1_final_90) %>%
   group_by(theta) %>% 
   summarise(i = median(sum_i))
   
-saveRDS(tic1_final_90, "../saves/tic1_final_90.rds")
+saveRDS(tic1_final, "../saves/tic1_final.rds")
 
-tic1_final_90 <- readRDS("../saves/tic1_final_90.rds")
+tic1_final <- readRDS("../saves/tic1_final.rds")
 
 
-ggplot(tic1_final_90, aes(x = theta, y = i)) +
+p_tic <- ggplot(tic1_final, aes(x = theta, y = i)) +
   geom_line() +
-  labs(title = "The test information curve for the 1PL",
-       #subtitle = "The curve is based on the posterior median.", 
-       x = expression(theta~('ability on the logit scale')),
-       y = "information") +
+  labs(x = expression(theta~('ability on the logit scale')),
+       y = "Information") +
   theme_few()
 ```
 
+```{r}
+ggdraw() +
+  draw_plot(p_icc + theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank(), legend.position = c(0.1, 0.1)))+
+  draw_plot(p_tic + theme(plot.background = element_blank()), x = 0.7, y = .2, width = .42, height = .42)
+```
 
-# Reliability
+```{r}
+ggsave("../graphs/ICC_1PL_final.pdf", height = 6, width = 12, scale = 1, bg = "white")
+```
 
-## KR20
+## Reliability
+
+### KR20
 
 ```{r}
 # full test
@@ -549,16 +556,15 @@ kr20_rel <- kr20(rel_dat, hit = 1)
 kr20_rel
 ```
 
-## Andrich Reliability
+### Andrich Reliability
 
 ```{r}
-pers_params <- ranef(irt1_final_90)$subjID%>%as_tibble(rownames = "subjID")
+pers_params <- ranef(irt1_final)$subjID%>%as_tibble(rownames = "subjID")
 
-rel <- 1 - 
+andrich_rel <- 1 - 
   (1/length(pers_params$Estimate.Intercept) * sum(pers_params$Est.Error.Intercept^2))/
   (1/(length(pers_params$Estimate.Intercept)-1)*sum((pers_params$Estimate.Intercept - mean(pers_params$Estimate.Intercept))^2))
 
-
-rel
+andrich_rel
 ```
 
