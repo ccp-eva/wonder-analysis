@@ -465,6 +465,15 @@ saveRDS(irt1_final, "../saves/irt1_final.rds")
 irt1_final <- readRDS("../saves/irt1_final.rds")
 ```
 
+## Item difficulties
+
+```{r}
+item_difficulty <- ranef(irt1_final)$word%>%as_tibble(rownames = "word")
+
+item_difficulty%>%saveRDS("../saves/easiness_final.rds")
+```
+
+
 ## Item characteristics curves
 
 ```{r}
